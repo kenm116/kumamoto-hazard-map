@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>熊本配達危険マップ｜配達ルート危険箇所マップ</title>
+<meta name="description" content="熊本配達危険マップ。郵便配達仲間限定、道路の危険箇所をリアルタイムで共有するマップです。">
+<meta name="robots" content="index,follow">
+<meta name="google-site-verification" content="MooaGIPY0oSKXHc6ueKyZTmqiE8kYjbyyU2_-A2JXrM" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --paper:#FAF7F0;
+    --ink:#2B2B28;
+    --ink-soft:#6b6a63;
+    --line:#DFD9C8;
+    --danger:#C63D2F;
+    --caution:#E8A33D;
+    --minor:#6B7A8F;
+    --resolved:#4C7A5E;
+    --post-red:#D2001F;
+    --card:#ffffff;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0;
+    font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    /* Intentionally NOT height:100vh / 100dvh anywhere in this version.
+       The page simply grows as tall as its content and the browser
+       handles scrolling natively - this avoids all the viewport-height
+       edge cases that caused buttons to be pushed off-screen before. */
+  }
+
+  .page{max-width:640px; margin:0 auto; padding-bottom:40px;}
+
+  header{padding:18px 16px 14px 16px;}
+  header h1{font-size:19px; margin:0 0 3px 0;}
+  header p{font-size:12px; color:var(--ink-soft); margin:0 0 12px 0;}
+
+  .stats{display:flex; gap:6px; flex-wrap:wrap;}
+  .stat-pill{
+    background:var(--card); border:1px solid var(--line);
+    border-radius:20px; padding:5px 12px; font-size:12px;
+  }
+  .stat-pill b{font-size:14px;}
+  .stat-pill.danger b{color:var(--danger);}
+  .stat-pill.resolved b{color:var(--resolved);}
+
+  .crack{width:100%; height:10px; margin-top:14px; display:block;}
+
+  /* Action bar - normal document flow, sticky just for convenience.
+     Sticky only needs `top`, no viewport-height math, so it can't
+     produce the bugs we hit before. */
+  .action-bar{
+    position:sticky;
+    top:0;
+    z-index:20;
+    background:var(--paper);
+    padding:10px 16px 12px 16px;
+    display:flex;
+    gap:10px;
+    border-bottom:1px solid var(--line);
+  }
+  .report-btn{
+    flex:1;
+    background:var(--post-red);
+    color:#fff;
+    border:none;
+    border-radius:12px;
+    padding:14px;
+    font-size:15px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .report-btn:active{opacity:.85;}
+  .refresh-btn{
+    width:52px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    font-size:18px;
+    cursor:pointer;
+  }
+
+  /* Map: a fixed, bounded-height card - never full screen, so a few
+     pixels of measurement error is invisible and nothing gets pushed
+     off the bottom of the page. */
+  .map-card{
+    margin:14px 16px 0 16px;
+    height:46vh;
+    min-height:280px;
+    max-height:420px;
+    border-radius:14px;
+    overflow:hidden;
+    border:1px solid var(--line);
+    position:relative;
+  }
+  #map{height:100%; width:100%;}
+  .locate-btn{
+    position:absolute;
+    left:10px;
+    bottom:10px;
+    z-index:15;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:50%;
+    width:40px; height:40px;
+    box-shadow:0 2px 6px rgba(0,0,0,.15);
+    font-size:16px;
+    cursor:pointer;
+  }
+  .tap-banner{
+    position:absolute;
+    top:10px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff;
+    padding:6px 12px; border-radius:16px;
+    font-size:11px; z-index:20; display:none;
+  }
+  .map-note{
+    font-size:11px; color:var(--ink-soft);
+    margin:8px 16px 0 16px;
+  }
+
+  /* List section - plain scrolling content, no popup/sheet */
+  .list-section{margin:26px 16px 0 16px;}
+  .list-section h2{font-size:15px; margin:0 0 10px 0;}
+  .report-card{
+    display:flex; gap:12px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px;
+    margin-bottom:10px;
+  }
+  .report-card img{
+    width:64px; height:64px; border-radius:8px; object-fit:cover; flex-shrink:0; background:var(--line);
+  }
+  .report-card .tag{
+    display:inline-block; font-size:10px; font-weight:700; color:#fff;
+    padding:2px 8px; border-radius:20px; margin-bottom:4px;
+  }
+  .report-card .comment{font-size:13px; margin:2px 0;}
+  .report-card .meta{font-size:11px; color:var(--ink-soft); margin-top:2px;}
+  .resolve-link{
+    margin-top:6px; border:none; background:none; color:var(--post-red);
+    font-size:12px; font-weight:700; padding:0; cursor:pointer;
+  }
+  .empty-state{
+    text-align:center; padding:36px 10px; color:var(--ink-soft); font-size:13px;
+    background:var(--card); border:1px dashed var(--line); border-radius:12px;
+  }
+
+  .hint-box{
+    margin:20px 16px 0 16px;
+    font-size:11px; color:var(--ink-soft); line-height:1.6;
+    background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px;
+  }
+
+  /* Report form panel: rendered inline in the normal page flow (NOT a
+     fixed overlay). This host environment doesn't reliably support
+     position:fixed full-screen overlays, so we avoid that entirely and
+     just show/hide a normal block-level section instead. */
+  .form-panel{
+    display:none;
+    margin:14px 16px 0 16px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:16px;
+  }
+  .form-panel.open{display:block;}
+  .modal-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
+  .modal-head h2{font-size:16px; margin:0;}
+  .modal-close{border:none; background:none; font-size:20px; color:var(--ink-soft); cursor:pointer; padding:4px 8px;}
+
+  .field{margin-bottom:16px;}
+  .field label{display:block; font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;}
+  .sev-options{display:flex; gap:8px;}
+  .sev-opt{
+    flex:1; text-align:center; padding:10px 4px; border-radius:10px;
+    border:2px solid var(--line); font-size:12px; font-weight:700; cursor:pointer;
+    background:var(--card); color:var(--ink-soft);
+  }
+  .sev-opt[data-sev="high"].active{background:var(--danger); border-color:var(--danger); color:#fff;}
+  .sev-opt[data-sev="mid"].active{background:var(--caution); border-color:var(--caution); color:#fff;}
+  .sev-opt[data-sev="low"].active{background:var(--minor); border-color:var(--minor); color:#fff;}
+
+  input[type="text"], textarea{
+    width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+    font-size:14px; font-family:inherit; background:var(--card); resize:vertical;
+  }
+  textarea{min-height:64px;}
+
+  .photo-input{display:flex; align-items:center; gap:12px;}
+  .photo-btn{
+    border:1px dashed var(--line); background:var(--card); border-radius:10px;
+    padding:14px; font-size:12px; color:var(--ink-soft); text-align:center; flex:1; cursor:pointer;
+  }
+  .photo-preview{width:64px; height:64px; border-radius:8px; object-fit:cover; display:none; border:1px solid var(--line);}
+
+  .loc-row{display:flex; gap:8px;}
+  .loc-btn{
+    border:1px solid var(--line); background:var(--card); border-radius:8px;
+    padding:8px 12px; font-size:12px; cursor:pointer; white-space:nowrap;
+  }
+  .loc-status{font-size:12px; margin-top:8px;}
+  .loc-status.ok{color:var(--resolved); font-weight:700;}
+  .loc-status.err{color:var(--danger);}
+
+  .submit-btn{
+    width:100%; background:var(--post-red); color:#fff; border:none; border-radius:10px;
+    padding:14px; font-size:15px; font-weight:700; cursor:pointer; margin-top:4px;
+  }
+  .submit-btn:disabled{background:#c9a3a3; cursor:not-allowed;}
+
+  /* Inline toast banner - deliberately NOT position:fixed (same reason as
+     the form panel above). Sits inside the sticky action-bar so it's
+     always in view without needing full-viewport positioning. */
+  .toast{
+    display:none;
+    margin:0 16px 12px 16px;
+    background:var(--ink); color:#fff;
+    padding:10px 14px; border-radius:10px;
+    font-size:13px;
+  }
+  .toast.show{display:block;}
+
+  .leaflet-popup-content-wrapper{border-radius:10px; font-family:inherit;}
+  .popup-body{font-size:13px; max-width:200px;}
+
+  .gate{
+    position:fixed; inset:0; z-index:999;
+    background:var(--paper);
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:flex-start;
+    padding:15vh 24px 24px 24px; text-align:center;
+  }
+  .gate.hidden{display:none;}
+  .gate h2{font-size:17px; margin:0 0 6px 0;}
+  .gate p{font-size:12px; color:var(--ink-soft); margin:0 0 18px 0; max-width:280px;}
+  .gate form{width:100%; max-width:240px; display:flex; flex-direction:column; align-items:center;}
+  .gate input{
+    width:100%; max-width:240px; border:1px solid var(--line); border-radius:10px;
+    padding:12px; font-size:15px; text-align:center; margin-bottom:10px;
+  }
+  .gate button{
+    width:100%; max-width:240px; background:var(--post-red); color:#fff; border:none;
+    border-radius:10px; padding:12px; font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .gate .err{color:var(--danger); font-size:12px; margin-top:8px; min-height:16px;}
+  .conn-badge{
+    position:fixed; top:8px; right:8px; z-index:900;
+    font-size:10px; padding:3px 9px; border-radius:12px;
+    background:var(--ink); color:#fff; opacity:.85;
+  }
+  .conn-badge.err{background:var(--danger);}
+
+  .tag-options{display:flex; flex-wrap:wrap; gap:8px;}
+  .tag-opt{
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:20px; padding:8px 14px; font-size:13px; cursor:pointer;
+  }
+  .tag-opt.active{background:var(--post-red); border-color:var(--post-red); color:#fff; font-weight:700;}
+
+  .export-row{display:flex; gap:8px; margin:10px 0 4px 0;}
+  .export-btn{
+    flex:1; border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:10px; padding:10px; font-size:13px; font-weight:700; cursor:pointer;
+  }
+
+  @media print{
+    .gate, .conn-badge, .action-bar, .form-panel, .map-card, .map-note, .export-row, .refresh-btn, .toast{
+      display:none !important;
+    }
+    body{background:#fff;}
+    .print-card{display:block !important; border:1px solid #999; border-radius:0; margin-bottom:10px; padding:10px; break-inside:avoid;}
+  }
+  .print-card{display:none;}
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate">
+  <h2>熊本配達危険マップ</h2>
+  <p>郵便配達仲間限定のツールです。共有された合言葉を入力してください。</p>
+  <form id="gateForm" autocomplete="off">
+    <input type="text" id="gateInput" placeholder="合言葉" autocomplete="off" autocapitalize="off" autocorrect="off" inputmode="text" enterkeyhint="go">
+    <button type="submit" id="gateBtn">入る</button>
+  </form>
+  <div class="err" id="gateErr"></div>
+</div>
+
+<div class="conn-badge" id="connBadge">接続中…</div>
+
+<div class="page">
+  <header>
+    <h1>危険箇所マップ</h1>
+    <p>熊本地震・配達ルート情報共有</p>
+    <div class="stats">
+      <div class="stat-pill"><b id="stat-total">0</b> 件</div>
+      <div class="stat-pill danger"><b id="stat-open">0</b> 未解消</div>
+      <div class="stat-pill resolved"><b id="stat-resolved">0</b> 解消済み</div>
+    </div>
+    <svg class="crack" viewBox="0 0 400 10" preserveAspectRatio="none">
+      <path d="M0,5 L30,5 L38,1 L46,8 L55,5 L90,5 L98,9 L108,4 L120,5 L160,5 L168,2 L178,7 L190,5 L230,5 L238,8 L248,3 L258,5 L300,5 L308,1 L318,6 L328,5 L400,5"
+        fill="none" stroke="#DFD9C8" stroke-width="1.5"/>
+    </svg>
+  </header>
+
+  <div class="action-bar">
+    <button class="report-btn" id="addBtn">＋ 危険箇所を報告</button>
+    <button class="refresh-btn" id="refreshBtn" title="最新の状態に更新">↻</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <section class="form-panel" id="formPanel">
+    <div class="modal-head">
+      <h2>危険箇所を報告</h2>
+      <button class="modal-close" id="formClose">✕ 閉じる</button>
+    </div>
+
+    <div class="field">
+      <label>写真</label>
+      <div class="photo-input">
+        <label class="photo-btn" id="photoLabel">
+          タップして撮影・選択
+          <input type="file" accept="image/*" capture="environment" id="photoInput" style="display:none">
+        </label>
+        <img id="photoPreview" class="photo-preview">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>危険度</label>
+      <div class="sev-options">
+        <div class="sev-opt" data-sev="high">高<br>通行注意</div>
+        <div class="sev-opt" data-sev="mid">中<br>要注意</div>
+        <div class="sev-opt" data-sev="low">低<br>軽微</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>位置（すぐ下の地図を使います）</label>
+      <div class="loc-row">
+        <button class="loc-btn" id="gpsBtn">📍 現在地を使う</button>
+        <button class="loc-btn" id="tapBtn">🗺️ 地図で指定</button>
+      </div>
+      <div class="loc-status" id="locStatus">位置が未設定です</div>
+      <input type="text" id="addressInput" placeholder="住所（位置を設定すると自動入力されます。目印など自由に編集可）" style="display:none; margin-top:8px;">
+    </div>
+
+    <div class="field">
+      <label>状況（当てはまるものをタップ、複数選択可）</label>
+      <div class="tag-options" id="tagOptions">
+        <button type="button" class="tag-opt" data-tag="陥没">陥没</button>
+        <button type="button" class="tag-opt" data-tag="亀裂">亀裂</button>
+        <button type="button" class="tag-opt" data-tag="土砂崩れ">土砂崩れ</button>
+        <button type="button" class="tag-opt" data-tag="冠水">冠水</button>
+        <button type="button" class="tag-opt" data-tag="瓦礫散乱">瓦礫散乱</button>
+        <button type="button" class="tag-opt" data-tag="倒壊物">倒壊物</button>
+        <button type="button" class="tag-opt" data-tag="電柱傾斜">電柱傾斜</button>
+        <button type="button" class="tag-opt" data-tag="ブロック塀崩落">ブロック塀崩落</button>
+        <button type="button" class="tag-opt" data-tag="信号機故障">信号機故障</button>
+        <button type="button" class="tag-opt" data-tag="通行止め">通行止め</button>
+        <button type="button" class="tag-opt" data-tag="段差">段差</button>
+        <button type="button" class="tag-opt" data-tag="停電">停電</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>補足メモ（任意）</label>
+      <textarea id="commentInput" placeholder="例：二輪通行不可、迂回推奨など"></textarea>
+    </div>
+
+    <div class="field">
+      <label>報告者名</label>
+      <input type="text" id="nameInput" placeholder="例：松尾">
+    </div>
+
+    <button class="submit-btn" id="submitBtn">この内容で報告する</button>
+  </section>
+
+  <div class="map-card">
+    <div id="map"></div>
+    <div class="tap-banner" id="tapBanner">地図をタップして位置を指定</div>
+    <button class="locate-btn" id="locateBtn" title="現在地へ移動">◎</button>
+  </div>
+  <div class="map-note">ピンをタップすると詳細が見られます。ピンの色：赤=危険度高／橙=中／灰=低</div>
+
+  <section class="list-section">
+    <h2 id="listHeading">報告一覧</h2>
+    <div class="export-row">
+      <button class="export-btn" id="printBtn">🖨️ 印刷して紙で共有</button>
+      <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
+    </div>
+    <div id="listBody">
+      <div class="empty-state">読み込み中…</div>
+    </div>
+    <div id="printArea"></div>
+  </section>
+
+  <div class="hint-box">
+    報告はこのアプリを開いている配達員全員に共有されます。写真は自動で軽量化されますが、報告件数が非常に多くなると保存容量の上限に達する場合があります。
+  </div>
+
+  <div style="text-align:center; margin:20px 0 10px 0;">
+    <button id="adminLink" type="button" style="border:none; background:none; color:#B8B2A0; font-size:11px; text-decoration:underline; padding:6px;">危険箇所マップ</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-auth-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-database-compat.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ▼▼▼ 設定してください ▼▼▼
+  // 1) Firebaseプロジェクト作成後、設定値をここに貼り付ける
+  const firebaseConfig = {
+    apiKey: "AIzaSyBUYwkZ-wcOE5lfDSj563UJ2eR2JWpoBvQ",
+    authDomain: "kumamoto-hazard-map.firebaseapp.com",
+    databaseURL: "https://kumamoto-hazard-map-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "kumamoto-hazard-map",
+    storageBucket: "kumamoto-hazard-map.firebasestorage.app",
+    messagingSenderId: "828112884275",
+    appId: "1:828112884275:web:11dea040e7cafae231c946"
+  };
+  // 2) 配達チーム内で決めた合言葉に変更する（第三者の悪戯アクセスを防ぐための簡易ゲート）
+  const TEAM_PASSCODE = "kumamoto2026";
+  // 3) 管理者用パスコード（全データ削除に使用。チーム内でも配達員全員には教えないでください）
+  const ADMIN_PASSCODE = "reset-2026";
+  // ▲▲▲ ここまで ▲▲▲
+
+  const GATE_KEY = "hazard-map-authed";
+  const KUMAMOTO_CENTER = [32.8032, 130.7079];
+  const NAME_KEY = "reporter-name";
+  let db, auth;
+
+  const SEV_META = {
+    high:  {label:"危険度：高", color:"#C63D2F"},
+    mid:   {label:"危険度：中", color:"#E8A33D"},
+    low:   {label:"危険度：低", color:"#6B7A8F"}
+  };
+
+  let map, markersLayer;
+  let reports = [];
+  let selectedSeverity = null;
+  let selectedLatLng = null;
+  const selectedTags = new Set();
+  let compressedPhoto = null;
+  let tapModeActive = false;
+
+  function toast(msg, isError){
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.style.background = isError ? "var(--danger)" : "var(--ink)";
+    t.classList.add("show");
+    t.scrollIntoView({behavior:"smooth", block:"center"});
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(()=>t.classList.remove("show"), isError ? 7000 : 2400);
+  }
+
+  function initMap(){
+    map = L.map("map", {zoomControl:false}).setView(KUMAMOTO_CENTER, 12);
+    L.control.zoom({position:"topright"}).addTo(map);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    markersLayer = L.layerGroup().addTo(map);
+
+    map.on("click", function(e){
+      if(!tapModeActive) return;
+      selectedLatLng = e.latlng;
+      updateLocStatus();
+      setTapMode(false);
+      toast("位置を設定しました");
+    });
+
+    window.addEventListener("resize", ()=> map.invalidateSize());
+  }
+
+  function hazardIcon(sev, resolved){
+    const color = resolved ? "#9AA39B" : (SEV_META[sev] ? SEV_META[sev].color : "#6B7A8F");
+    const html = `
+      <div style="position:relative; width:28px; height:38px;">
+        <svg width="28" height="38" viewBox="0 0 30 40">
+          <path d="M15 40 L15 14" stroke="${color}" stroke-width="3"/>
+          <path d="M15 6 L28 12 L15 18 L15 6 Z" fill="${color}" stroke="#2B2B28" stroke-width="1"/>
+          <circle cx="15" cy="8" r="3.2" fill="${resolved ? '#4C7A5E' : '#2B2B28'}"/>
+        </svg>
+      </div>`;
+    return L.divIcon({html, className:"", iconSize:[28,38], iconAnchor:[14,38], popupAnchor:[0,-36]});
+  }
+
+  function setConnBadge(state){
+    const el = document.getElementById("connBadge");
+    if(state === "ok"){ el.textContent = "接続済み"; el.className = "conn-badge"; setTimeout(()=>{el.style.display="none";}, 2000); }
+    else if(state === "connecting"){ el.textContent = "接続中…"; el.className = "conn-badge"; el.style.display="block"; }
+    else { el.textContent = "接続エラー"; el.className = "conn-badge err"; el.style.display="block"; }
+  }
+
+  function initFirebase(){
+    if(typeof firebase === "undefined"){
+      setConnBadge("err");
+      toast("Firebaseライブラリの読み込みに失敗しました。通信環境を確認するか、ブラウザで直接開いてください。", true);
+      return;
+    }
+    try{
+      firebase.initializeApp(firebaseConfig);
+      auth = firebase.auth();
+      db = firebase.database();
+    }catch(e){
+      setConnBadge("err");
+      toast("Firebaseの初期化に失敗しました: " + (e.message||e), true);
+      return;
+    }
+    setConnBadge("connecting");
+    auth.signInAnonymously().catch(e=>{
+      setConnBadge("err");
+      toast("認証に失敗しました: " + (e.message||e), true);
+    });
+    auth.onAuthStateChanged(user=>{
+      if(user) subscribeReports();
+    });
+  }
+
+  function subscribeReports(){
+    db.ref("reports").on("value", snapshot=>{
+      const val = snapshot.val() || {};
+      reports = Object.keys(val).map(id=>Object.assign({id}, val[id]));
+      renderAll();
+      setConnBadge("ok");
+    }, err=>{
+      setConnBadge("err");
+      toast("データの読み込みに失敗しました: " + (err.message||err), true);
+    });
+  }
+
+  async function pushReport(newReport){
+    await db.ref("reports").push(newReport);
+  }
+
+  async function markResolved(id){
+    await db.ref("reports/" + id).update({resolved:true});
+  }
+
+  function loadSavedName(){
+    try{
+      const v = localStorage.getItem(NAME_KEY);
+      if(v) document.getElementById("nameInput").value = v;
+    }catch(e){}
+  }
+  function saveName(name){
+    try{ localStorage.setItem(NAME_KEY, name); }catch(e){}
+  }
+
+  function renderAll(){
+    renderStats();
+    renderMarkers();
+    renderList();
+  }
+
+  function renderStats(){
+    const total = reports.length;
+    const resolved = reports.filter(r=>r.resolved).length;
+    document.getElementById("stat-total").textContent = total;
+    document.getElementById("stat-open").textContent = total - resolved;
+    document.getElementById("stat-resolved").textContent = resolved;
+    document.getElementById("listHeading").textContent = `報告一覧（${total}件）`;
+  }
+
+  function renderMarkers(){
+    markersLayer.clearLayers();
+    reports.forEach(r=>{
+      const marker = L.marker([r.lat, r.lng], {icon: hazardIcon(r.severity, r.resolved)});
+      marker.bindPopup(popupHtml(r));
+      marker.on("popupopen", () => bindPopupResolve(r.id));
+      markersLayer.addLayer(marker);
+    });
+  }
+
+  function popupHtml(r){
+    const meta = SEV_META[r.severity] || SEV_META.low;
+    const dateStr = new Date(r.createdAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
+    return `
+      <div class="popup-body">
+        <span class="tag" style="display:inline-block;font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;margin-bottom:5px;background:${r.resolved ? '#4C7A5E' : meta.color}">${r.resolved ? "解消済み" : meta.label}</span>
+        ${r.photo ? `<img src="${r.photo}" style="width:100%;border-radius:6px;margin-bottom:6px;display:block;">` : ""}
+        <div style="font-size:11px;color:#6b6a63;margin-bottom:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
+        <div>${escapeHtml(r.comment || "（メモなし）")}</div>
+        <div style="color:#6b6a63;font-size:11px;margin-top:4px;">${escapeHtml(r.reporterName || "匿名")}・${dateStr}</div>
+        ${r.resolved ? "" : `<button class="popup-resolve-btn" data-id="${r.id}" style="margin-top:8px;width:100%;border:1px solid #DFD9C8;background:#FAF7F0;border-radius:6px;padding:6px;font-size:12px;cursor:pointer;">解消済みにする</button>`}
+      </div>`;
+  }
+
+  function bindPopupResolve(id){
+    const btn = document.querySelector(`.popup-resolve-btn[data-id="${id}"]`);
+    if(!btn) return;
+    btn.addEventListener("click", async ()=>{
+      btn.disabled = true;
+      btn.textContent = "更新中…";
+      try{
+        await markResolved(id);
+        toast("解消済みにしました");
+        map.closePopup();
+      }catch(e){
+        toast("更新に失敗しました: " + (e.message||e), true);
+        btn.disabled = false;
+        btn.textContent = "解消済みにする";
+      }
+    });
+  }
+
+  function renderList(){
+    const body = document.getElementById("listBody");
+    if(reports.length === 0){
+      body.innerHTML = `<div class="empty-state">まだ報告がありません。<br>上の「＋ 危険箇所を報告」から最初の報告をしましょう。</div>`;
+      return;
+    }
+    const sorted = [...reports].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+    body.innerHTML = sorted.map(r=>{
+      const meta = SEV_META[r.severity] || SEV_META.low;
+      const dateStr = new Date(r.createdAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
+      return `
+        <div class="report-card" data-id="${r.id}">
+          ${r.photo ? `<img src="${r.photo}">` : `<div style="width:64px;height:64px;border-radius:8px;background:#DFD9C8;flex-shrink:0;"></div>`}
+          <div style="flex:1; min-width:0;">
+            <span class="tag" style="background:${r.resolved ? 'var(--resolved)' : meta.color}">${r.resolved ? "解消済み" : meta.label}</span>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
+            <div class="comment">${escapeHtml(r.comment || "（メモなし）")}</div>
+            <div class="meta">${escapeHtml(r.reporterName || "匿名")}・${dateStr}</div>
+            <button class="report-goto-link" data-id="${r.id}" style="margin-top:6px;border:none;background:none;color:var(--ink-soft);font-size:12px;text-decoration:underline;padding:0;cursor:pointer;">地図で見る</button>
+            ${r.resolved ? "" : `<button class="resolve-link" data-id="${r.id}">解消済みにする</button>`}
+          </div>
+        </div>`;
+    }).join("");
+
+    body.querySelectorAll(".report-goto-link").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const r = reports.find(x=>x.id===el.dataset.id);
+        if(!r) return;
+        document.querySelector(".map-card").scrollIntoView({behavior:"smooth", block:"center"});
+        map.setView([r.lat, r.lng], 16);
+        setTimeout(()=>{
+          markersLayer.eachLayer(m=>{
+            const ll = m.getLatLng();
+            if(Math.abs(ll.lat-r.lat)<1e-9 && Math.abs(ll.lng-r.lng)<1e-9){ m.openPopup(); }
+          });
+        }, 400);
+      });
+    });
+
+    body.querySelectorAll(".resolve-link").forEach(el=>{
+      el.addEventListener("click", async ()=>{
+        el.disabled = true;
+        el.textContent = "更新中…";
+        try{
+          await markResolved(el.dataset.id);
+          toast("解消済みにしました");
+        }catch(e){
+          toast("更新に失敗しました: " + (e.message||e), true);
+          el.disabled = false;
+          el.textContent = "解消済みにする";
+        }
+      });
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  function displayLocation(r){
+    if(r.address && r.address.trim()) return r.address.trim();
+    if(typeof r.lat === "number" && typeof r.lng === "number"){
+      return `付近（緯度${r.lat.toFixed(5)}, 経度${r.lng.toFixed(5)}）`;
+    }
+    return "位置不明";
+  }
+
+  const SEV_LABEL = {high:"危険度：高", mid:"危険度：中", low:"危険度：低"};
+
+  function printReports(){
+    if(!reports || reports.length === 0){
+      toast("まだ報告がありません");
+      return;
+    }
+    const sorted = [...reports].sort((a,b)=> (a.resolved===b.resolved) ? 0 : (a.resolved?1:-1));
+    const area = document.getElementById("printArea");
+    area.innerHTML = `
+      <div class="print-card" style="display:block;">
+        <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
+        <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／全${sorted.length}件</p>
+      </div>
+      ${sorted.map((r,i)=>`
+        <div class="print-card" style="display:block;">
+          <div style="font-weight:700; font-size:14px;">
+            ${i+1}. ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
+          </div>
+          <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
+          <div style="font-size:12px; color:#444;">
+            位置：${escapeHtml(displayLocation(r))}<br>
+            報告者：${escapeHtml(r.reporterName || "匿名")}／日時：${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""}
+          </div>
+        </div>
+      `).join("")}
+    `;
+    window.print();
+  }
+
+  function exportCSV(){
+    if(!reports || reports.length === 0){
+      toast("まだ報告がありません");
+      return;
+    }
+    const header = ["状態","危険度","状況","住所","報告者","日時"];
+    const rows = reports.map(r=>[
+      r.resolved ? "解消済み" : "未解消",
+      SEV_LABEL[r.severity] || "",
+      r.comment || "",
+      displayLocation(r),
+      r.reporterName || "",
+      r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""
+    ]);
+    const csvEscape = v => `"${String(v).replace(/"/g,'""')}"`;
+    const csv = "\uFEFF" + [header, ...rows].map(row=>row.map(csvEscape).join(",")).join("\r\n");
+    const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const dateStr = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `熊本配達危険マップ_${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  }
+
+  async function handleAdminReset(){
+    const pass = window.prompt("管理者用パスコードを入力してください");
+    if(pass === null) return; // キャンセル
+    if(pass !== ADMIN_PASSCODE){
+      toast("パスコードが違います", true);
+      return;
+    }
+    const count = reports ? reports.length : 0;
+    const sure = window.confirm(
+      `現在の報告データ（${count}件）をすべて削除します。この操作は取り消せません。\n\n本当に削除してよろしいですか？`
+    );
+    if(!sure) return;
+
+    try{
+      if(!db) throw new Error("Firebase未接続です");
+      await db.ref("reports").remove();
+      toast("すべての報告データを削除しました");
+    }catch(e){
+      toast("削除に失敗しました: " + (e.message||e), true);
+    }
+  }
+
+  function compressPhoto(file){
+    return new Promise((resolve, reject)=>{
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = e=>{ img.src = e.target.result; };
+      reader.onerror = reject;
+      img.onload = ()=>{
+        const maxW = 480;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.4));
+      };
+      img.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function resetForm(){
+    selectedSeverity = null;
+    selectedLatLng = null;
+    compressedPhoto = null;
+    selectedTags.clear();
+    document.querySelectorAll(".sev-opt").forEach(el=>el.classList.remove("active"));
+    document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
+    document.getElementById("commentInput").value = "";
+    document.getElementById("photoPreview").style.display = "none";
+    document.getElementById("photoInput").value = "";
+    document.getElementById("photoLabel").textContent = "タップして撮影・選択";
+    document.getElementById("addressInput").value = "";
+    document.getElementById("addressInput").style.display = "none";
+    updateLocStatus();
+  }
+
+  function updateLocStatus(){
+    const el = document.getElementById("locStatus");
+    const addrInput = document.getElementById("addressInput");
+    if(selectedLatLng){
+      el.textContent = `設定済み（${selectedLatLng.lat.toFixed(5)}, ${selectedLatLng.lng.toFixed(5)}）`;
+      el.className = "loc-status ok";
+      addrInput.style.display = "block";
+      addrInput.value = "住所を取得中…";
+      addrInput.disabled = true;
+      fetchAddress(selectedLatLng.lat, selectedLatLng.lng).then(addr=>{
+        // Only overwrite if user hasn't started editing meanwhile
+        if(addrInput.value === "住所を取得中…"){
+          addrInput.value = addr || "";
+        }
+        addrInput.disabled = false;
+        addrInput.placeholder = "住所（自由に編集できます。目印などを追加してください）";
+      });
+    }else{
+      el.textContent = "位置が未設定です";
+      el.className = "loc-status";
+      addrInput.style.display = "none";
+      addrInput.value = "";
+    }
+  }
+
+  async function fetchAddress(lat, lng){
+    try{
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=ja`, {
+        headers: {"Accept": "application/json"}
+      });
+      if(!res.ok) throw new Error("reverse geocode failed");
+      const data = await res.json();
+      const a = data.address || {};
+      const parts = [
+        a.state, a.city || a.town || a.village,
+        a.suburb || a.neighbourhood,
+        a.road,
+        a.house_number
+      ].filter(Boolean);
+      return parts.join("") || data.display_name || "";
+    }catch(e){
+      return "";
+    }
+  }
+
+  function setTapMode(on){
+    tapModeActive = on;
+    document.getElementById("tapBanner").style.display = on ? "block" : "none";
+    if(on){
+      closeModal();
+      document.querySelector(".map-card").scrollIntoView({behavior:"smooth", block:"center"});
+    }
+  }
+
+  async function handleSubmit(){
+    if(!selectedSeverity){ toast("危険度を選択してください"); return; }
+    if(!selectedLatLng){ toast("位置を設定してください"); return; }
+
+    const name = document.getElementById("nameInput").value.trim();
+    const tagsText = Array.from(selectedTags).join("・");
+    const extraNote = document.getElementById("commentInput").value.trim();
+    const comment = tagsText + (extraNote ? (tagsText ? "／" : "") + extraNote : "");
+    if(!comment){ toast("状況（タグ）か補足メモのどちらかを入力してください"); return; }
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true;
+    btn.textContent = "送信中…";
+
+    const address = document.getElementById("addressInput").value.trim();
+    const newReport = {
+      lat: selectedLatLng.lat,
+      lng: selectedLatLng.lng,
+      address,
+      severity: selectedSeverity,
+      comment,
+      reporterName: name,
+      photo: compressedPhoto,
+      resolved: false,
+      createdAt: new Date().toISOString()
+    };
+
+    try{
+      if(!db) throw new Error("Firebase未接続のため保存できません。ページを再読み込みしてください。");
+      await pushReport(newReport);
+      if(name) saveName(name);
+      closeModal();
+      resetForm();
+      map.setView([newReport.lat, newReport.lng], 15);
+      toast("報告を共有しました");
+    }catch(e){
+      toast("保存に失敗しました: " + (e.message||e), true);
+      // keep form open so input isn't lost
+    }finally{
+      btn.disabled = false;
+      btn.textContent = "この内容で報告する";
+    }
+  }
+
+  function openModal(){
+    document.getElementById("formPanel").classList.add("open");
+    document.getElementById("formPanel").scrollIntoView({behavior:"smooth", block:"start"});
+  }
+  function closeModal(){
+    document.getElementById("formPanel").classList.remove("open");
+  }
+
+  function initEvents(){
+    document.getElementById("addBtn").addEventListener("click", openModal);
+    document.getElementById("formClose").addEventListener("click", closeModal);
+
+    document.getElementById("refreshBtn").addEventListener("click", ()=>{
+      toast("この地図はリアルタイムで自動更新されています");
+    });
+
+    document.querySelectorAll(".sev-opt").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        document.querySelectorAll(".sev-opt").forEach(x=>x.classList.remove("active"));
+        el.classList.add("active");
+        selectedSeverity = el.dataset.sev;
+      });
+    });
+
+    document.querySelectorAll(".tag-opt").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const tag = el.dataset.tag;
+        if(selectedTags.has(tag)){
+          selectedTags.delete(tag);
+          el.classList.remove("active");
+        }else{
+          selectedTags.add(tag);
+          el.classList.add("active");
+        }
+      });
+    });
+
+    document.getElementById("printBtn").addEventListener("click", printReports);
+    document.getElementById("csvBtn").addEventListener("click", exportCSV);
+    document.getElementById("adminLink").addEventListener("click", handleAdminReset);
+
+    document.getElementById("photoInput").addEventListener("change", async (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      document.getElementById("photoLabel").textContent = "処理中…";
+      try{
+        compressedPhoto = await compressPhoto(file);
+        const preview = document.getElementById("photoPreview");
+        preview.src = compressedPhoto;
+        preview.style.display = "block";
+        document.getElementById("photoLabel").textContent = "写真を変更";
+      }catch(err){
+        document.getElementById("photoLabel").textContent = "タップして撮影・選択";
+        toast("写真の処理に失敗しました");
+      }
+    });
+
+    document.getElementById("gpsBtn").addEventListener("click", ()=>{
+      if(!navigator.geolocation){ toast("この端末は位置情報に対応していません"); return; }
+      document.getElementById("locStatus").textContent = "取得中…";
+      navigator.geolocation.getCurrentPosition(
+        pos=>{
+          selectedLatLng = {lat:pos.coords.latitude, lng:pos.coords.longitude};
+          updateLocStatus();
+        },
+        err=>{
+          const el = document.getElementById("locStatus");
+          el.textContent = "取得できませんでした。地図で指定してください。";
+          el.className = "loc-status err";
+        },
+        {enableHighAccuracy:true, timeout:8000}
+      );
+    });
+
+    document.getElementById("tapBtn").addEventListener("click", ()=>setTapMode(true));
+    document.getElementById("submitBtn").addEventListener("click", handleSubmit);
+
+    document.getElementById("locateBtn").addEventListener("click", ()=>{
+      if(!navigator.geolocation){ toast("この端末は位置情報に対応していません"); return; }
+      navigator.geolocation.getCurrentPosition(
+        pos=> map.setView([pos.coords.latitude, pos.coords.longitude], 15),
+        ()=> toast("現在地を取得できませんでした")
+      );
+    });
+  }
+
+  function tryUnlock(e){
+    if(e) e.preventDefault();
+    const val = document.getElementById("gateInput").value.trim();
+    if(val === TEAM_PASSCODE){
+      try{ localStorage.setItem(GATE_KEY, "1"); }catch(e){}
+      document.getElementById("gate").classList.add("hidden");
+      start();
+    }else{
+      document.getElementById("gateErr").textContent = "合言葉が違います";
+    }
+    return false;
+  }
+
+  function start(){
+    if(window.__hazardMapStarted) return;
+    window.__hazardMapStarted = true;
+    initMap();
+    initEvents();
+    loadSavedName();
+    initFirebase();
+  }
+
+  document.getElementById("gateForm").addEventListener("submit", tryUnlock);
+
+  let alreadyIn = false;
+  try{ alreadyIn = localStorage.getItem(GATE_KEY) === "1"; }catch(e){}
+  if(alreadyIn){
+    document.getElementById("gate").classList.add("hidden");
+    start();
+  }
+})();
+</script>
+</body>
+</html>
