@@ -8,6 +8,7 @@
 <meta name="robots" content="index,follow">
 <meta name="google-site-verification" content="MooaGIPY0oSKXHc6ueKyZTmqiE8kYjbyyU2_-A2JXrM" />
 <meta name="google-site-verification" content="d7kyqBnWbYSeK8I90hiCmYANjjlA9t1s-YOBBy5MG5A" />
+<meta name="color-scheme" content="light only">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <style>
   :root{
@@ -37,7 +38,7 @@
   .page{max-width:640px; margin:0 auto; padding-bottom:40px;}
 
   header{padding:18px 16px 14px 16px;}
-  header h1{font-size:19px; margin:0 0 3px 0;}
+  header h1{font-size:19px; margin:0 0 3px 0; color:var(--ink);}
   header p{font-size:12px; color:var(--ink-soft); margin:0 0 12px 0;}
 
   .stats{display:flex; gap:6px; flex-wrap:wrap;}
@@ -126,7 +127,7 @@
 
   /* List section - plain scrolling content, no popup/sheet */
   .list-section{margin:26px 16px 0 16px;}
-  .list-section h2{font-size:15px; margin:0 0 10px 0;}
+  .list-section h2{font-size:15px; margin:0 0 10px 0; color:var(--ink);}
   .report-card{
     display:flex; gap:12px;
     background:var(--card);
@@ -173,7 +174,7 @@
   }
   .form-panel.open{display:block;}
   .modal-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
-  .modal-head h2{font-size:16px; margin:0;}
+  .modal-head h2{font-size:16px; margin:0; color:var(--ink);}
   .modal-close{border:none; background:none; font-size:20px; color:var(--ink-soft); cursor:pointer; padding:4px 8px;}
 
   .field{margin-bottom:16px;}
@@ -239,7 +240,7 @@
     padding:15vh 24px 24px 24px; text-align:center;
   }
   .gate.hidden{display:none;}
-  .gate h2{font-size:17px; margin:0 0 6px 0;}
+  .gate h2{font-size:17px; margin:0 0 6px 0; color:var(--ink);}
   .gate p{font-size:12px; color:var(--ink-soft); margin:0 0 18px 0; max-width:280px;}
   .gate form{width:100%; max-width:240px; display:flex; flex-direction:column; align-items:center;}
   .gate input{
@@ -265,17 +266,35 @@
   }
   .tag-opt.active{background:var(--post-red); border-color:var(--post-red); color:#fff; font-weight:700;}
 
-  .export-row{display:flex; gap:8px; margin:10px 0 4px 0;}
+  .export-row{display:flex; gap:8px; margin:10px 0 4px 0; flex-wrap:wrap;}
   .export-btn{
-    flex:1; border:1px solid var(--line); background:#fff; color:var(--ink);
+    flex:1; min-width:140px; border:1px solid var(--line); background:#fff; color:var(--ink);
     border-radius:10px; padding:10px; font-size:13px; font-weight:700; cursor:pointer;
   }
+  .print-zoom-row{
+    display:flex; align-items:center; gap:8px; margin:0 0 10px 0; font-size:12px; color:var(--ink-soft);
+  }
+  .print-zoom-row select{
+    flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);
+  }
+
+  /* Monochrome basemap: only the tile layer is desaturated, markers/circles are untouched */
+  .leaflet-tile-pane{ filter: grayscale(1) contrast(1.05); }
+
+  .sev-filter-row{display:flex; gap:14px; margin:10px 16px 0 16px; font-size:12px; color:var(--ink);}
+  .sev-filter-row label{display:flex; align-items:center; gap:5px; cursor:pointer; color:var(--ink);}
+  .sev-filter-row input{width:15px; height:15px;}
 
   @media print{
-    .gate, .conn-badge, .action-bar, .form-panel, .map-card, .map-note, .export-row, .refresh-btn, .toast{
+    .gate, .conn-badge, .action-bar, .form-panel, .map-note, .export-row, .refresh-btn, .toast,
+    .sev-filter-row, .locate-btn, .tap-banner, .leaflet-control-zoom{
       display:none !important;
     }
     body{background:#fff;}
+    .map-card{
+      height:520px !important; max-height:none !important; min-height:0 !important;
+      margin:0 0 14px 0 !important; border:1px solid #999 !important; break-inside:avoid;
+    }
     .print-card{display:block !important; border:1px solid #999; border-radius:0; margin-bottom:10px; padding:10px; break-inside:avoid;}
   }
   .print-card{display:none;}
@@ -337,9 +356,9 @@
     <div class="field">
       <label>危険度</label>
       <div class="sev-options">
-        <div class="sev-opt" data-sev="high">高<br>通行注意</div>
-        <div class="sev-opt" data-sev="mid">中<br>要注意</div>
-        <div class="sev-opt" data-sev="low">低<br>軽微</div>
+        <div class="sev-opt" data-sev="high">危険</div>
+        <div class="sev-opt" data-sev="mid">要注意</div>
+        <div class="sev-opt" data-sev="low">警戒</div>
       </div>
     </div>
 
@@ -389,10 +408,25 @@
     <div class="tap-banner" id="tapBanner">地図をタップして位置を指定</div>
     <button class="locate-btn" id="locateBtn" title="現在地へ移動">◎</button>
   </div>
-  <div class="map-note">ピンをタップすると詳細が見られます。ピンの色：赤=危険度高／橙=中／灰=低</div>
+  <div class="sev-filter-row" id="sevFilterRow">
+    <label><input type="checkbox" data-sev="high" checked> 危険</label>
+    <label><input type="checkbox" data-sev="mid" checked> 要注意</label>
+    <label><input type="checkbox" data-sev="low" checked> 警戒</label>
+  </div>
+  <div class="map-note">ピンをタップすると詳細が見られます。番号は一覧の番号と対応しています。ピンの色／周囲の円：赤=危険／橙=要注意／灰=警戒</div>
 
   <section class="list-section">
     <h2 id="listHeading">報告一覧</h2>
+    <div class="print-zoom-row">
+      <span>印刷時の地図倍率：</span>
+      <select id="printZoomSelect">
+        <option value="13">広め</option>
+        <option value="14">やや広め</option>
+        <option value="15" selected>標準</option>
+        <option value="16">やや詳細</option>
+        <option value="17">詳細</option>
+      </select>
+    </div>
     <div class="export-row">
       <button class="export-btn" id="printBtn">🖨️ 印刷して紙で共有</button>
       <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
@@ -443,10 +477,13 @@
   let db, auth;
 
   const SEV_META = {
-    high:  {label:"危険度：高", color:"#C63D2F"},
-    mid:   {label:"危険度：中", color:"#E8A33D"},
-    low:   {label:"危険度：低", color:"#6B7A8F"}
+    high:  {label:"危険", color:"#C63D2F"},
+    mid:   {label:"要注意", color:"#E8A33D"},
+    low:   {label:"警戒", color:"#6B7A8F"}
   };
+
+  const visibleSeverities = new Set(["high","mid","low"]);
+  let circlesLayer;
 
   let map, markersLayer;
   let reports = [];
@@ -474,6 +511,7 @@
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
     markersLayer = L.layerGroup().addTo(map);
+    circlesLayer = L.layerGroup().addTo(map);
 
     map.on("click", function(e){
       if(!tapModeActive) return;
@@ -486,17 +524,19 @@
     window.addEventListener("resize", ()=> map.invalidateSize());
   }
 
-  function hazardIcon(sev, resolved){
+  function hazardIcon(sev, resolved, number){
     const color = resolved ? "#9AA39B" : (SEV_META[sev] ? SEV_META[sev].color : "#6B7A8F");
+    const numLabel = number != null ? number : "";
     const html = `
-      <div style="position:relative; width:28px; height:38px;">
-        <svg width="28" height="38" viewBox="0 0 30 40">
-          <path d="M15 40 L15 14" stroke="${color}" stroke-width="3"/>
+      <div style="position:relative; width:30px; height:40px;">
+        <svg width="30" height="40" viewBox="0 0 30 40">
+          <path d="M15 40 L15 15" stroke="${color}" stroke-width="3"/>
           <path d="M15 6 L28 12 L15 18 L15 6 Z" fill="${color}" stroke="#2B2B28" stroke-width="1"/>
-          <circle cx="15" cy="8" r="3.2" fill="${resolved ? '#4C7A5E' : '#2B2B28'}"/>
+          <circle cx="15" cy="8" r="7" fill="${resolved ? '#4C7A5E' : '#2B2B28'}"/>
+          <text x="15" y="8" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="700" fill="#fff" font-family="sans-serif">${numLabel}</text>
         </svg>
       </div>`;
-    return L.divIcon({html, className:"", iconSize:[28,38], iconAnchor:[14,38], popupAnchor:[0,-36]});
+    return L.divIcon({html, className:"", iconSize:[30,40], iconAnchor:[15,40], popupAnchor:[0,-38]});
   }
 
   function setConnBadge(state){
@@ -576,22 +616,47 @@
     document.getElementById("listHeading").textContent = `報告一覧（${total}件）`;
   }
 
+  function buildNumberMap(){
+    const sorted = [...reports].sort((a,b)=> new Date(a.createdAt) - new Date(b.createdAt));
+    const map = {};
+    sorted.forEach((r,i)=>{ map[r.id] = i+1; });
+    return map;
+  }
+
   function renderMarkers(){
     markersLayer.clearLayers();
+    circlesLayer.clearLayers();
+    const numberMap = buildNumberMap();
     reports.forEach(r=>{
-      const marker = L.marker([r.lat, r.lng], {icon: hazardIcon(r.severity, r.resolved)});
-      marker.bindPopup(popupHtml(r));
+      if(!visibleSeverities.has(r.severity)) return;
+      const meta = SEV_META[r.severity] || SEV_META.low;
+
+      // Colored translucent circle behind the pin, marking the hazard on the (now monochrome) basemap.
+      // Uses a pixel radius (circleMarker) so every circle is the same size regardless of zoom level.
+      const circle = L.circleMarker([r.lat, r.lng], {
+        radius: 18,
+        color: meta.color,
+        weight: 1,
+        opacity: 0.6,
+        fillColor: meta.color,
+        fillOpacity: 0.28,
+        interactive: false
+      });
+      circlesLayer.addLayer(circle);
+
+      const marker = L.marker([r.lat, r.lng], {icon: hazardIcon(r.severity, r.resolved, numberMap[r.id])});
+      marker.bindPopup(popupHtml(r, numberMap[r.id]));
       marker.on("popupopen", () => bindPopupResolve(r.id));
       markersLayer.addLayer(marker);
     });
   }
 
-  function popupHtml(r){
+  function popupHtml(r, number){
     const meta = SEV_META[r.severity] || SEV_META.low;
     const dateStr = new Date(r.createdAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
     return `
       <div class="popup-body">
-        <span class="tag" style="display:inline-block;font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;margin-bottom:5px;background:${r.resolved ? '#4C7A5E' : meta.color}">${r.resolved ? "解消済み" : meta.label}</span>
+        <span class="tag" style="display:inline-block;font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;margin-bottom:5px;background:${r.resolved ? '#4C7A5E' : meta.color}">No.${number ?? ""} ${r.resolved ? "解消済み" : meta.label}</span>
         ${r.photo ? `<img src="${r.photo}" style="width:100%;border-radius:6px;margin-bottom:6px;display:block;">` : ""}
         <div style="font-size:11px;color:#6b6a63;margin-bottom:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
         <div>${escapeHtml(r.comment || "（メモなし）")}</div>
@@ -624,6 +689,7 @@
       body.innerHTML = `<div class="empty-state">まだ報告がありません。<br>上の「＋ 危険箇所を報告」から最初の報告をしましょう。</div>`;
       return;
     }
+    const numberMap = buildNumberMap();
     const sorted = [...reports].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
     body.innerHTML = sorted.map(r=>{
       const meta = SEV_META[r.severity] || SEV_META.low;
@@ -632,7 +698,7 @@
         <div class="report-card" data-id="${r.id}">
           ${r.photo ? `<img src="${r.photo}">` : `<div style="width:64px;height:64px;border-radius:8px;background:#DFD9C8;flex-shrink:0;"></div>`}
           <div style="flex:1; min-width:0;">
-            <span class="tag" style="background:${r.resolved ? 'var(--resolved)' : meta.color}">${r.resolved ? "解消済み" : meta.label}</span>
+            <span class="tag" style="background:${r.resolved ? 'var(--resolved)' : meta.color}">No.${numberMap[r.id]} ${r.resolved ? "解消済み" : meta.label}</span>
             <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
             <div class="comment">${escapeHtml(r.comment || "（メモなし）")}</div>
             <div class="meta">${escapeHtml(r.reporterName || "匿名")}・${dateStr}</div>
@@ -685,24 +751,25 @@
     return "位置不明";
   }
 
-  const SEV_LABEL = {high:"危険度：高", mid:"危険度：中", low:"危険度：低"};
+  const SEV_LABEL = {high:"危険", mid:"要注意", low:"警戒"};
 
   function printReports(){
     if(!reports || reports.length === 0){
       toast("まだ報告がありません");
       return;
     }
-    const sorted = [...reports].sort((a,b)=> (a.resolved===b.resolved) ? 0 : (a.resolved?1:-1));
+    const numberMap = buildNumberMap();
+    const sorted = [...reports].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
     const area = document.getElementById("printArea");
     area.innerHTML = `
       <div class="print-card" style="display:block;">
         <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
         <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／全${sorted.length}件</p>
       </div>
-      ${sorted.map((r,i)=>`
+      ${sorted.map(r=>`
         <div class="print-card" style="display:block;">
           <div style="font-weight:700; font-size:14px;">
-            ${i+1}. ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
+            No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
           </div>
           <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
           <div style="font-size:12px; color:#444;">
@@ -712,7 +779,28 @@
         </div>
       `).join("")}
     `;
-    window.print();
+
+    // Fix the printed map to a chosen zoom level (constant regardless of how
+    // spread out the pins are), keeping the current on-screen map center.
+    const zoomSelect = document.getElementById("printZoomSelect");
+    const printZoom = parseInt(zoomSelect.value, 10);
+    const originalCenter = map.getCenter();
+    const originalZoom = map.getZoom();
+
+    map.setView(originalCenter, printZoom, {animate:false});
+    map.invalidateSize();
+
+    const restoreAndPrint = () => {
+      window.print();
+      // Restore the on-screen view once the print dialog is dismissed.
+      setTimeout(()=>{
+        map.setView(originalCenter, originalZoom, {animate:false});
+        map.invalidateSize();
+      }, 300);
+    };
+
+    // Give newly-loaded tiles at the print zoom level a moment to render.
+    setTimeout(restoreAndPrint, 350);
   }
 
   function exportCSV(){
@@ -720,15 +808,20 @@
       toast("まだ報告がありません");
       return;
     }
-    const header = ["状態","危険度","状況","住所","報告者","日時"];
-    const rows = reports.map(r=>[
-      r.resolved ? "解消済み" : "未解消",
-      SEV_LABEL[r.severity] || "",
-      r.comment || "",
-      displayLocation(r),
-      r.reporterName || "",
-      r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""
-    ]);
+    const numberMap = buildNumberMap();
+    const header = ["番号","状態","危険度","タグ","補足メモ","住所","報告者","日時"];
+    const rows = [...reports]
+      .sort((a,b)=> numberMap[a.id]-numberMap[b.id])
+      .map(r=>[
+        numberMap[r.id],
+        r.resolved ? "解消済み" : "未解消",
+        SEV_LABEL[r.severity] || "",
+        r.tags != null ? r.tags : (r.comment || ""),
+        r.note != null ? r.note : "",
+        displayLocation(r),
+        r.reporterName || "",
+        r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""
+      ]);
     const csvEscape = v => `"${String(v).replace(/"/g,'""')}"`;
     const csv = "\uFEFF" + [header, ...rows].map(row=>row.map(csvEscape).join(",")).join("\r\n");
     const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
@@ -894,6 +987,8 @@
       address,
       severity: selectedSeverity,
       comment,
+      tags: tagsText,
+      note: extraNote,
       reporterName: name,
       photo: compressedPhoto,
       resolved: false,
@@ -951,6 +1046,15 @@
           selectedTags.add(tag);
           el.classList.add("active");
         }
+      });
+    });
+
+    document.querySelectorAll('#sevFilterRow input[type="checkbox"]').forEach(el=>{
+      el.addEventListener("change", ()=>{
+        const sev = el.dataset.sev;
+        if(el.checked) visibleSeverities.add(sev);
+        else visibleSeverities.delete(sev);
+        renderMarkers();
       });
     });
 
