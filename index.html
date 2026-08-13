@@ -434,7 +434,7 @@
   // 2) 配達チーム内で決めた合言葉に変更する（第三者の悪戯アクセスを防ぐための簡易ゲート）
   const TEAM_PASSCODE = "kumamoto2026";
   // 3) 管理者用パスコード（全データ削除に使用。チーム内でも配達員全員には教えないでください）
-  const ADMIN_PASSCODE = "reset-2026";
+  // 3) 管理者ログインはFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
   // ▲▲▲ ここまで ▲▲▲
 
   const GATE_KEY = "hazard-map-authed";
@@ -744,24 +744,42 @@
   }
 
   async function handleAdminReset(){
-    const pass = window.prompt("管理者用パスコードを入力してください");
-    if(pass === null) return; // キャンセル
-    if(pass !== ADMIN_PASSCODE){
-      toast("パスコードが違います", true);
+    if(!auth || !db){
+      toast("Firebase未接続です", true);
       return;
     }
+    const email = window.prompt("管理者用メールアドレスを入力してください");
+    if(email === null) return; // キャンセル
+    const password = window.prompt("パスワードを入力してください");
+    if(password === null) return; // キャンセル
+
+    let cred;
+    try{
+      cred = await auth.signInWithEmailAndPassword(email.trim(), password);
+    }catch(e){
+      toast("ログインに失敗しました: " + (e.message||e), true);
+      // 念のため匿名認証に戻す
+      auth.signInAnonymously().catch(()=>{});
+      return;
+    }
+
     const count = reports ? reports.length : 0;
     const sure = window.confirm(
-      `現在の報告データ（${count}件）をすべて削除します。この操作は取り消せません。\n\n本当に削除してよろしいですか？`
+      `管理者としてログインしました。\n現在の報告データ（${count}件）をすべて削除します。この操作は取り消せません。\n\n本当に削除してよろしいですか？`
     );
-    if(!sure) return;
+    if(!sure){
+      auth.signInAnonymously().catch(()=>{});
+      return;
+    }
 
     try{
-      if(!db) throw new Error("Firebase未接続です");
       await db.ref("reports").remove();
       toast("すべての報告データを削除しました");
     }catch(e){
       toast("削除に失敗しました: " + (e.message||e), true);
+    }finally{
+      // 削除後は再び匿名アカウントに戻し、通常利用を継続できるようにする
+      auth.signInAnonymously().catch(()=>{});
     }
   }
 
