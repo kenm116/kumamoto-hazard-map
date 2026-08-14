@@ -128,6 +128,12 @@
   /* List section - plain scrolling content, no popup/sheet */
   .list-section{margin:26px 16px 0 16px;}
   .list-section h2{font-size:15px; margin:0 0 10px 0; color:var(--ink);}
+  .list-tabs{display:flex; gap:8px; margin-bottom:12px;}
+  .list-tab{
+    flex:1; border:1px solid var(--line); background:#fff; color:var(--ink-soft);
+    border-radius:10px; padding:9px; font-size:13px; font-weight:700; cursor:pointer;
+  }
+  .list-tab.active{background:var(--ink); color:#fff; border-color:var(--ink);}
   .report-card{
     display:flex; gap:12px;
     background:var(--card);
@@ -287,13 +293,14 @@
 
   @media print{
     .gate, .conn-badge, .action-bar, .form-panel, .map-note, .export-row, .refresh-btn, .toast,
-    .sev-filter-row, .locate-btn, .tap-banner, .leaflet-control-zoom{
+    .sev-filter-row, .locate-btn, .tap-banner, .leaflet-control-zoom, .list-tabs, .print-zoom-row{
       display:none !important;
     }
     body{background:#fff;}
     .map-card{
       height:520px !important; max-height:none !important; min-height:0 !important;
-      margin:0 0 14px 0 !important; border:1px solid #999 !important; break-inside:avoid;
+      margin:0 0 14px 0 !important; border:1px solid #999 !important;
+      break-after:page; page-break-after:always;
     }
     .print-card{display:block !important; border:1px solid #999; border-radius:0; margin-bottom:10px; padding:10px; break-inside:avoid;}
   }
@@ -338,9 +345,10 @@
 
   <section class="form-panel" id="formPanel">
     <div class="modal-head">
-      <h2>危険箇所を報告</h2>
+      <h2 id="formTitle">危険箇所を報告</h2>
       <button class="modal-close" id="formClose">✕ 閉じる</button>
     </div>
+    <input type="hidden" id="editingId" value="">
 
     <div class="field">
       <label>写真</label>
@@ -412,10 +420,15 @@
     <label><input type="checkbox" data-sev="high" checked> 危険</label>
     <label><input type="checkbox" data-sev="mid" checked> 要注意</label>
     <label><input type="checkbox" data-sev="low" checked> 警戒</label>
+    <label><input type="checkbox" id="showResolvedOnMap"> 解消済みも表示</label>
   </div>
   <div class="map-note">ピンをタップすると詳細が見られます。番号は一覧の番号と対応しています。ピンの色／周囲の円：赤=危険／橙=要注意／灰=警戒</div>
 
   <section class="list-section">
+    <div class="list-tabs" id="listTabs">
+      <button type="button" class="list-tab active" data-tab="open">未解消</button>
+      <button type="button" class="list-tab" data-tab="resolved">解消済み</button>
+    </div>
     <h2 id="listHeading">報告一覧</h2>
     <div class="print-zoom-row">
       <span>印刷時の地図倍率：</span>
@@ -587,6 +600,10 @@
     await db.ref("reports").push(newReport);
   }
 
+  async function updateReport(id, patch){
+    await db.ref("reports/" + id).update(patch);
+  }
+
   async function markResolved(id){
     await db.ref("reports/" + id).update({resolved:true});
   }
@@ -623,12 +640,18 @@
     return map;
   }
 
+  function isVisibleOnMap(r){
+    if(!visibleSeverities.has(r.severity)) return false;
+    if(r.resolved && !document.getElementById("showResolvedOnMap").checked) return false;
+    return true;
+  }
+
   function renderMarkers(){
     markersLayer.clearLayers();
     circlesLayer.clearLayers();
     const numberMap = buildNumberMap();
     reports.forEach(r=>{
-      if(!visibleSeverities.has(r.severity)) return;
+      if(!isVisibleOnMap(r)) return;
       const meta = SEV_META[r.severity] || SEV_META.low;
 
       // Colored translucent circle behind the pin, marking the hazard on the (now monochrome) basemap.
@@ -683,14 +706,23 @@
     });
   }
 
+  let activeListTab = "open";
+
   function renderList(){
     const body = document.getElementById("listBody");
-    if(reports.length === 0){
-      body.innerHTML = `<div class="empty-state">まだ報告がありません。<br>上の「＋ 危険箇所を報告」から最初の報告をしましょう。</div>`;
+    const heading = document.getElementById("listHeading");
+    const filtered = reports.filter(r => activeListTab === "resolved" ? r.resolved : !r.resolved);
+
+    heading.textContent = activeListTab === "resolved" ? `解消済み一覧（${filtered.length}件）` : `未解消一覧（${filtered.length}件）`;
+
+    if(filtered.length === 0){
+      body.innerHTML = activeListTab === "resolved"
+        ? `<div class="empty-state">解消済みの報告はまだありません。</div>`
+        : `<div class="empty-state">まだ報告がありません。<br>上の「＋ 危険箇所を報告」から最初の報告をしましょう。</div>`;
       return;
     }
     const numberMap = buildNumberMap();
-    const sorted = [...reports].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+    const sorted = [...filtered].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
     body.innerHTML = sorted.map(r=>{
       const meta = SEV_META[r.severity] || SEV_META.low;
       const dateStr = new Date(r.createdAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
@@ -702,8 +734,11 @@
             <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
             <div class="comment">${escapeHtml(r.comment || "（メモなし）")}</div>
             <div class="meta">${escapeHtml(r.reporterName || "匿名")}・${dateStr}</div>
-            <button class="report-goto-link" data-id="${r.id}" style="margin-top:6px;border:none;background:none;color:var(--ink-soft);font-size:12px;text-decoration:underline;padding:0;cursor:pointer;">地図で見る</button>
-            ${r.resolved ? "" : `<button class="resolve-link" data-id="${r.id}">解消済みにする</button>`}
+            <div style="display:flex; gap:12px; margin-top:6px; flex-wrap:wrap;">
+              <button class="report-goto-link" data-id="${r.id}" style="border:none;background:none;color:var(--ink-soft);font-size:12px;text-decoration:underline;padding:0;cursor:pointer;">地図で見る</button>
+              <button class="report-edit-link" data-id="${r.id}" style="border:none;background:none;color:var(--ink-soft);font-size:12px;text-decoration:underline;padding:0;cursor:pointer;">編集する</button>
+              ${r.resolved ? "" : `<button class="resolve-link" data-id="${r.id}" style="margin-top:0;">解消済みにする</button>`}
+            </div>
           </div>
         </div>`;
     }).join("");
@@ -720,6 +755,14 @@
             if(Math.abs(ll.lat-r.lat)<1e-9 && Math.abs(ll.lng-r.lng)<1e-9){ m.openPopup(); }
           });
         }, 400);
+      });
+    });
+
+    body.querySelectorAll(".report-edit-link").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const r = reports.find(x=>x.id===el.dataset.id);
+        if(!r) return;
+        openEditForm(r);
       });
     });
 
@@ -758,13 +801,18 @@
       toast("まだ報告がありません");
       return;
     }
+    const filtered = reports.filter(isVisibleOnMap);
+    if(filtered.length === 0){
+      toast("現在の表示条件（危険度・解消済み）に一致する報告がありません");
+      return;
+    }
     const numberMap = buildNumberMap();
-    const sorted = [...reports].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
+    const sorted = [...filtered].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
     const area = document.getElementById("printArea");
     area.innerHTML = `
       <div class="print-card" style="display:block;">
         <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
-        <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／全${sorted.length}件</p>
+        <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示中の条件で${sorted.length}件</p>
       </div>
       ${sorted.map(r=>`
         <div class="print-card" style="display:block;">
@@ -902,6 +950,9 @@
     selectedLatLng = null;
     compressedPhoto = null;
     selectedTags.clear();
+    document.getElementById("editingId").value = "";
+    document.getElementById("formTitle").textContent = "危険箇所を報告";
+    document.getElementById("submitBtn").textContent = "この内容で報告する";
     document.querySelectorAll(".sev-opt").forEach(el=>el.classList.remove("active"));
     document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
     document.getElementById("commentInput").value = "";
@@ -981,7 +1032,9 @@
     btn.textContent = "送信中…";
 
     const address = document.getElementById("addressInput").value.trim();
-    const newReport = {
+    const editingId = document.getElementById("editingId").value;
+
+    const reportData = {
       lat: selectedLatLng.lat,
       lng: selectedLatLng.lng,
       address,
@@ -990,26 +1043,74 @@
       tags: tagsText,
       note: extraNote,
       reporterName: name,
-      photo: compressedPhoto,
-      resolved: false,
-      createdAt: new Date().toISOString()
+      photo: compressedPhoto
     };
 
     try{
       if(!db) throw new Error("Firebase未接続のため保存できません。ページを再読み込みしてください。");
-      await pushReport(newReport);
+      if(editingId){
+        reportData.updatedAt = new Date().toISOString();
+        await updateReport(editingId, reportData);
+        toast("報告を更新しました");
+      }else{
+        reportData.resolved = false;
+        reportData.createdAt = new Date().toISOString();
+        await pushReport(reportData);
+        toast("報告を共有しました");
+      }
       if(name) saveName(name);
       closeModal();
+      map.setView([reportData.lat, reportData.lng], 15);
       resetForm();
-      map.setView([newReport.lat, newReport.lng], 15);
-      toast("報告を共有しました");
     }catch(e){
       toast("保存に失敗しました: " + (e.message||e), true);
       // keep form open so input isn't lost
     }finally{
       btn.disabled = false;
-      btn.textContent = "この内容で報告する";
+      btn.textContent = editingId ? "この内容で更新する" : "この内容で報告する";
     }
+  }
+
+  function openEditForm(r){
+    resetForm();
+    document.getElementById("editingId").value = r.id;
+    document.getElementById("formTitle").textContent = "報告を編集";
+    document.getElementById("submitBtn").textContent = "この内容で更新する";
+
+    selectedSeverity = r.severity;
+    document.querySelectorAll(".sev-opt").forEach(el=>{
+      el.classList.toggle("active", el.dataset.sev === r.severity);
+    });
+
+    selectedTags.clear();
+    if(r.tags){
+      r.tags.split("・").filter(Boolean).forEach(t=>selectedTags.add(t));
+    }
+    document.querySelectorAll(".tag-opt").forEach(el=>{
+      el.classList.toggle("active", selectedTags.has(el.dataset.tag));
+    });
+    document.getElementById("commentInput").value = (r.note !== undefined) ? r.note : (r.comment || "");
+
+    selectedLatLng = {lat:r.lat, lng:r.lng};
+    updateLocStatus();
+    const addrInput = document.getElementById("addressInput");
+    if(r.address){
+      addrInput.value = r.address;
+      addrInput.disabled = false;
+      addrInput.style.display = "block";
+    }
+
+    if(r.photo){
+      compressedPhoto = r.photo;
+      const preview = document.getElementById("photoPreview");
+      preview.src = r.photo;
+      preview.style.display = "block";
+      document.getElementById("photoLabel").textContent = "写真を変更";
+    }
+
+    document.getElementById("nameInput").value = r.reporterName || document.getElementById("nameInput").value;
+
+    openModal();
   }
 
   function openModal(){
@@ -1049,12 +1150,22 @@
       });
     });
 
-    document.querySelectorAll('#sevFilterRow input[type="checkbox"]').forEach(el=>{
+    document.querySelectorAll('#sevFilterRow input[data-sev]').forEach(el=>{
       el.addEventListener("change", ()=>{
         const sev = el.dataset.sev;
         if(el.checked) visibleSeverities.add(sev);
         else visibleSeverities.delete(sev);
         renderMarkers();
+      });
+    });
+
+    document.getElementById("showResolvedOnMap").addEventListener("change", renderMarkers);
+
+    document.querySelectorAll(".list-tab").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        activeListTab = el.dataset.tab;
+        document.querySelectorAll(".list-tab").forEach(t=>t.classList.toggle("active", t===el));
+        renderList();
       });
     });
 
