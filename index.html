@@ -277,12 +277,6 @@
     flex:1; min-width:140px; border:1px solid var(--line); background:#fff; color:var(--ink);
     border-radius:10px; padding:10px; font-size:13px; font-weight:700; cursor:pointer;
   }
-  .print-zoom-row{
-    display:flex; align-items:center; gap:8px; margin:0 0 10px 0; font-size:12px; color:var(--ink-soft);
-  }
-  .print-zoom-row select{
-    flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);
-  }
 
   /* Monochrome basemap: only the tile layer is desaturated, markers/circles are untouched */
   .leaflet-tile-pane{ filter: grayscale(1) contrast(1.05); }
@@ -292,6 +286,7 @@
   .sev-filter-row input{width:15px; height:15px;}
 
   @media print{
+    @page{ size: landscape; margin: 12mm; }
     .gate, .conn-badge, .action-bar, .form-panel, .map-note, .export-row, .refresh-btn, .toast,
     .sev-filter-row, .locate-btn, .tap-banner, .leaflet-control-zoom, .list-tabs, .print-zoom-row{
       display:none !important;
@@ -303,8 +298,15 @@
       break-after:page; page-break-after:always;
     }
     .print-card{display:block !important; border:1px solid #999; border-radius:0; margin-bottom:10px; padding:10px; break-inside:avoid;}
+    .print-map-card{
+      display:block !important; height:480px !important; border:1px solid #999 !important;
+      margin:0 0 14px 0 !important;
+    }
+    .grid-page{break-after:page; page-break-after:always;}
+    .grid-page:last-child{break-after:auto; page-break-after:auto;}
   }
   .print-card{display:none;}
+  .print-map-card{display:none;}
 </style>
 </head>
 <body>
@@ -430,19 +432,26 @@
       <button type="button" class="list-tab" data-tab="resolved">解消済み</button>
     </div>
     <h2 id="listHeading">報告一覧</h2>
-    <div class="print-zoom-row">
+    <div class="print-zoom-row" style="display:flex; align-items:center; gap:8px; margin:0 0 6px 0; font-size:12px; color:var(--ink-soft);">
       <span>印刷時の地図倍率：</span>
-      <select id="printZoomSelect">
-        <option value="13">広め</option>
-        <option value="14">やや広め</option>
-        <option value="15" selected>標準</option>
-        <option value="16">やや詳細</option>
-        <option value="17">詳細</option>
+      <select id="printZoomSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
+        <option value="14">広め</option>
+        <option value="15">やや広め</option>
+        <option value="16" selected>標準（道路が分かる程度）</option>
+        <option value="17">やや詳細</option>
+        <option value="18">詳細</option>
       </select>
     </div>
+    <div class="print-zoom-row" style="font-size:12px; color:var(--ink-soft); margin:0 0 10px 0;">
+      中心位置は今地図に表示されている場所のまま、倍率だけ選んだ設定で印刷されます。エリアを変えたい場合は地図を動かしてから印刷してください。
+    </div>
     <div class="export-row">
-      <button class="export-btn" id="printBtn">🖨️ 印刷して紙で共有</button>
+      <button class="export-btn" id="printBtn">🖨️ 今の表示範囲を印刷</button>
+      <button class="export-btn" id="printGridBtn">🗺️ 全域を自動分割して印刷</button>
       <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
+    </div>
+    <div class="print-zoom-row" style="font-size:11px; color:var(--ink-soft); margin:-4px 0 10px 0;">
+      「全域を自動分割して印刷」は、表示条件（危険度・解消済み）に一致する報告すべてを、選んだ倍率のまま複数ページに分けて印刷します。
     </div>
     <div id="listBody">
       <div class="empty-state">読み込み中…</div>
@@ -801,54 +810,161 @@
       toast("まだ報告がありません");
       return;
     }
-    const filtered = reports.filter(isVisibleOnMap);
-    if(filtered.length === 0){
-      toast("現在の表示条件（危険度・解消済み）に一致する報告がありません");
-      return;
-    }
-    const numberMap = buildNumberMap();
-    const sorted = [...filtered].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
-    const area = document.getElementById("printArea");
-    area.innerHTML = `
-      <div class="print-card" style="display:block;">
-        <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
-        <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示中の条件で${sorted.length}件</p>
-      </div>
-      ${sorted.map(r=>`
-        <div class="print-card" style="display:block;">
-          <div style="font-weight:700; font-size:14px;">
-            No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
-          </div>
-          <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
-          <div style="font-size:12px; color:#444;">
-            位置：${escapeHtml(displayLocation(r))}<br>
-            報告者：${escapeHtml(r.reporterName || "匿名")}／日時：${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""}
-          </div>
-        </div>
-      `).join("")}
-    `;
 
-    // Fix the printed map to a chosen zoom level (constant regardless of how
-    // spread out the pins are), keeping the current on-screen map center.
+    // Apply the chosen print zoom level, keeping the current on-screen center.
     const zoomSelect = document.getElementById("printZoomSelect");
     const printZoom = parseInt(zoomSelect.value, 10);
     const originalCenter = map.getCenter();
     const originalZoom = map.getZoom();
-
     map.setView(originalCenter, printZoom, {animate:false});
     map.invalidateSize();
 
-    const restoreAndPrint = () => {
+    // Give newly-loaded tiles at the print zoom level a moment to render before
+    // reading the bounds and opening the print dialog.
+    setTimeout(()=>{
+      // Only include hazards that fall within the map's bounds at the print zoom
+      // level (and match the severity/resolved checkboxes), so the printed list
+      // lines up exactly with the pins visible on the printed map.
+      const bounds = map.getBounds();
+      const filtered = reports.filter(r => isVisibleOnMap(r) && bounds.contains([r.lat, r.lng]));
+
+      if(filtered.length === 0){
+        toast("この倍率・表示範囲に、条件に合う報告がありません。地図を動かすか倍率を変えてください");
+        map.setView(originalCenter, originalZoom, {animate:false});
+        map.invalidateSize();
+        return;
+      }
+
+      const numberMap = buildNumberMap();
+      const sorted = [...filtered].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
+      const area = document.getElementById("printArea");
+      area.innerHTML = `
+        <div class="print-card" style="display:block;">
+          <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
+          <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示範囲内：${sorted.length}件</p>
+        </div>
+        ${sorted.map(r=>`
+          <div class="print-card" style="display:block;">
+            <div style="font-weight:700; font-size:14px;">
+              No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
+            </div>
+            <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
+            <div style="font-size:12px; color:#444;">
+              位置：${escapeHtml(displayLocation(r))}<br>
+              報告者：${escapeHtml(r.reporterName || "匿名")}／日時：${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""}
+            </div>
+          </div>
+        `).join("")}
+      `;
+
       window.print();
-      // Restore the on-screen view once the print dialog is dismissed.
+
+      // Restore the original on-screen view once the print dialog is dismissed.
       setTimeout(()=>{
         map.setView(originalCenter, originalZoom, {animate:false});
         map.invalidateSize();
       }, 300);
-    };
+    }, 350);
+  }
 
-    // Give newly-loaded tiles at the print zoom level a moment to render.
-    setTimeout(restoreAndPrint, 350);
+  // Prints the whole set of currently-visible (severity/resolved) hazards across
+  // multiple pages, one map + its matching list per page, at a fixed zoom level.
+  // Each page is a genuine, independent Leaflet map (not a captured image), which
+  // avoids the CORS/canvas problems that come with trying to screenshot map tiles.
+  async function autoPrintGrid(){
+    if(!reports || reports.length === 0){
+      toast("まだ報告がありません");
+      return;
+    }
+    const filtered = reports.filter(isVisibleOnMap);
+    if(filtered.length === 0){
+      toast("表示条件（危険度・解消済み）に一致する報告がありません");
+      return;
+    }
+
+    const zoom = parseInt(document.getElementById("printZoomSelect").value, 10);
+    const PAGE_PX = {w: 760, h: 480};   // approximate printed map size at this zoom
+    const OVERLAP = 0.12;               // slight overlap so nothing falls on a seam
+
+    // Use a temporary, invisible reference map to ask Leaflet exactly how much
+    // lat/lng one page covers at this zoom and pixel size (avoids re-deriving
+    // Leaflet's projection math by hand).
+    const overallBounds = L.latLngBounds(filtered.map(r=>[r.lat, r.lng])).pad(0.15);
+    const refDiv = document.createElement("div");
+    refDiv.style.cssText = `position:fixed; left:-9999px; top:0; width:${PAGE_PX.w}px; height:${PAGE_PX.h}px;`;
+    document.body.appendChild(refDiv);
+    const refMap = L.map(refDiv, {zoomControl:false, attributionControl:false})
+      .setView(overallBounds.getCenter(), zoom);
+    const cellBounds = refMap.getBounds();
+    const latSpan = cellBounds.getNorth() - cellBounds.getSouth();
+    const lngSpan = cellBounds.getEast() - cellBounds.getWest();
+    refMap.remove();
+    document.body.removeChild(refDiv);
+
+    const stepLat = latSpan * (1 - OVERLAP);
+    const stepLng = lngSpan * (1 - OVERLAP);
+    const rows = Math.max(1, Math.ceil((overallBounds.getNorth() - overallBounds.getSouth()) / stepLat));
+    const cols = Math.max(1, Math.ceil((overallBounds.getEast() - overallBounds.getWest()) / stepLng));
+    const totalPages = rows * cols;
+
+    if(totalPages > 12){
+      const ok = window.confirm(`この倍率だと ${totalPages} ページになります（多めです）。倍率を下げると枚数を減らせます。このまま続けますか？`);
+      if(!ok) return;
+    }
+
+    const centers = [];
+    for(let row=0; row<rows; row++){
+      for(let col=0; col<cols; col++){
+        centers.push({
+          lat: overallBounds.getSouth() + stepLat*row + stepLat/2,
+          lng: overallBounds.getWest()  + stepLng*col + stepLng/2
+        });
+      }
+    }
+
+    const numberMap = buildNumberMap();
+    const area = document.getElementById("printArea");
+    area.innerHTML = centers.map((c,i)=>`
+      <div class="grid-page">
+        <div class="print-card" style="display:block;">
+          <h1 style="font-size:16px; margin:0 0 4px 0;">熊本配達危険マップ（${i+1}/${centers.length}ページ目）</h1>
+          <p style="font-size:11px; color:#666; margin:0 0 8px 0;">出力日時：${new Date().toLocaleString("ja-JP")}</p>
+        </div>
+        <div class="print-map-card" id="gridmap-${i}"></div>
+        <div id="gridlist-${i}"></div>
+      </div>
+    `).join("");
+
+    const gridMaps = centers.map((c,i)=> L.map(`gridmap-${i}`, {zoomControl:false, attributionControl:false}).setView([c.lat, c.lng], zoom));
+
+    // Let all the grid maps' tiles load before filling in each page's list and printing.
+    setTimeout(()=>{
+      centers.forEach((c,i)=>{
+        const b = gridMaps[i].getBounds();
+        const pageReports = filtered.filter(r => b.contains([r.lat, r.lng]));
+        const sorted = [...pageReports].sort((a,b2)=> (a.resolved===b2.resolved) ? (numberMap[a.id]-numberMap[b2.id]) : (a.resolved?1:-1));
+        document.getElementById(`gridlist-${i}`).innerHTML = sorted.length === 0
+          ? `<div class="print-card" style="display:block;">この範囲に該当する報告はありません。</div>`
+          : sorted.map(r=>`
+              <div class="print-card" style="display:block;">
+                <div style="font-weight:700; font-size:13px;">
+                  No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
+                </div>
+                <div style="font-size:12px; margin:3px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
+                <div style="font-size:11px; color:#444;">
+                  位置：${escapeHtml(displayLocation(r))}／報告者：${escapeHtml(r.reporterName || "匿名")}
+                </div>
+              </div>
+            `).join("");
+      });
+
+      window.print();
+
+      setTimeout(()=>{
+        gridMaps.forEach(m=>m.remove());
+        area.innerHTML = "";
+      }, 300);
+    }, 700);
   }
 
   function exportCSV(){
@@ -1170,6 +1286,7 @@
     });
 
     document.getElementById("printBtn").addEventListener("click", printReports);
+    document.getElementById("printGridBtn").addEventListener("click", autoPrintGrid);
     document.getElementById("csvBtn").addEventListener("click", exportCSV);
     document.getElementById("adminLink").addEventListener("click", handleAdminReset);
 
