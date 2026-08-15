@@ -310,6 +310,10 @@
       margin:0 !important; border:1px solid #999 !important;
       break-after:page; page-break-after:always;
     }
+    /* No pins in the printed view: print the map alone, no trailing blank page. */
+    body.print-mode-single.print-no-list .map-card{
+      break-after:auto !important; page-break-after:auto !important;
+    }
 
     .print-card{display:block !important; border:1px solid #999; border-radius:0; margin-bottom:10px; padding:10px; break-inside:avoid;}
     .leaflet-tile-pane{ filter: grayscale(1) contrast(1.05) !important; }
@@ -578,6 +582,20 @@
     });
 
     window.addEventListener("resize", ()=> map.invalidateSize());
+
+    // Default the initial view to the person's current location at the
+    // "standard" print zoom level, so the map opens already road-level
+    // useful. Falls back silently to the wide Kumamoto overview (already
+    // set above) if location isn't available or permission is denied.
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+        },
+        () => { /* keep the Kumamoto-wide fallback view */ },
+        {timeout: 8000}
+      );
+    }
   }
 
   function hazardIcon(sev, resolved, number){
@@ -861,10 +879,6 @@
   const SEV_LABEL = {high:"危険", mid:"要注意", low:"警戒"};
 
   function printReports(){
-    if(!reports || reports.length === 0){
-      toast("まだ報告がありません");
-      return;
-    }
     document.body.classList.add("print-mode-single");
 
     // "表示範囲を印刷": the map's zoom is already kept snapped to one of the
@@ -874,40 +888,42 @@
     // needed, which is what caused pins to unexpectedly fall outside the
     // view before.
     const bounds = map.getBounds();
-    const filtered = reports.filter(r => isVisibleOnMap(r) && bounds.contains([r.lat, r.lng]));
+    const filtered = (reports || []).filter(r => isVisibleOnMap(r) && bounds.contains([r.lat, r.lng]));
+    const area = document.getElementById("printArea");
 
     if(filtered.length === 0){
-      toast("今の表示範囲に、条件に合う報告がありません。地図を動かすか表示条件を確認してください");
-      document.body.classList.remove("print-mode-single");
-      return;
-    }
-
-    const numberMap = buildNumberMap();
-    const sorted = [...filtered].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
-    const area = document.getElementById("printArea");
-    area.innerHTML = `
-      <div class="print-card" style="display:block;">
-        <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
-        <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示範囲内：${sorted.length}件</p>
-      </div>
-      ${sorted.map(r=>`
+      // No matching pins in view: print just the map, with no second list
+      // page (there's nothing to list).
+      document.body.classList.add("print-no-list");
+      area.innerHTML = "";
+    }else{
+      document.body.classList.remove("print-no-list");
+      const numberMap = buildNumberMap();
+      const sorted = [...filtered].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
+      area.innerHTML = `
         <div class="print-card" style="display:block;">
-          <div style="font-weight:700; font-size:14px;">
-            No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
-          </div>
-          <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
-          <div style="font-size:12px; color:#444;">
-            位置：${escapeHtml(displayLocation(r))}<br>
-            報告者：${escapeHtml(r.reporterName || "匿名")}／日時：${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""}
-          </div>
+          <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
+          <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示範囲内：${sorted.length}件</p>
         </div>
-      `).join("")}
-    `;
+        ${sorted.map(r=>`
+          <div class="print-card" style="display:block;">
+            <div style="font-weight:700; font-size:14px;">
+              No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
+            </div>
+            <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
+            <div style="font-size:12px; color:#444;">
+              位置：${escapeHtml(displayLocation(r))}<br>
+              報告者：${escapeHtml(r.reporterName || "匿名")}／日時：${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""}
+            </div>
+          </div>
+        `).join("")}
+      `;
+    }
 
     window.print();
 
     setTimeout(()=>{
-      document.body.classList.remove("print-mode-single");
+      document.body.classList.remove("print-mode-single", "print-no-list");
       area.innerHTML = "";
     }, 300);
   }
