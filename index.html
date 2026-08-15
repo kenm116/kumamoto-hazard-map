@@ -402,7 +402,7 @@
         <button type="button" class="tag-opt" data-tag="土砂崩れ">土砂崩れ</button>
         <button type="button" class="tag-opt" data-tag="冠水">冠水</button>
         <button type="button" class="tag-opt" data-tag="瓦礫散乱">瓦礫散乱</button>
-        <button type="button" class="tag-opt" data-tag="倒壊物">倒壊物</button>
+        <button type="button" class="tag-opt" data-tag="建物倒壊">建物倒壊</button>
         <button type="button" class="tag-opt" data-tag="電柱傾斜">電柱傾斜</button>
         <button type="button" class="tag-opt" data-tag="ブロック塀崩落">ブロック塀崩落</button>
         <button type="button" class="tag-opt" data-tag="信号機故障">信号機故障</button>
@@ -920,12 +920,31 @@
       `;
     }
 
-    window.print();
+    // Force the map container to the actual A4-landscape printable size via
+    // inline styles (rather than relying solely on @media print CSS), then
+    // explicitly tell Leaflet its size changed and give it a moment to fetch
+    // the tiles for that larger area — otherwise Leaflet keeps using its old,
+    // small on-screen pixel size and only the top-left corner ends up with
+    // map tiles, with everything else printing as blank/grey space.
+    const mapCard = document.querySelector(".map-card");
+    const prevStyle = mapCard.getAttribute("style") || "";
+    mapCard.style.setProperty("width", "277mm", "important");
+    mapCard.style.setProperty("height", "180mm", "important");
+    mapCard.style.setProperty("max-width", "none", "important");
+    mapCard.style.setProperty("margin", "0 auto", "important");
+    mapCard.style.setProperty("border", "1px solid #999", "important");
+    map.invalidateSize();
 
     setTimeout(()=>{
-      document.body.classList.remove("print-mode-single", "print-no-list");
-      area.innerHTML = "";
-    }, 300);
+      window.print();
+
+      setTimeout(()=>{
+        mapCard.setAttribute("style", prevStyle);
+        map.invalidateSize();
+        document.body.classList.remove("print-mode-single", "print-no-list");
+        area.innerHTML = "";
+      }, 300);
+    }, 500);
   }
 
   function exportCSV(){
