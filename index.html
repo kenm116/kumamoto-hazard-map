@@ -302,7 +302,7 @@
     .list-section{ display:block !important; margin:0 !important; }
     #printArea{ display:block !important; }
 
-    /* "表示範囲の危険箇所を印刷": the live on-screen map fills the page
+    /* "表示範囲を印刷": the live on-screen map fills the page
        (sized to match the A4 landscape printable area), then the text list. */
     body.print-mode-single .map-card{
       display:block !important;
@@ -451,10 +451,10 @@
       </select>
     </div>
     <div class="print-zoom-row" style="font-size:12px; color:var(--ink-soft); margin:0 0 10px 0;">
-      表示範囲内の危険箇所の中心に自動で合わせ、選んだ倍率で印刷されます。エリアを変えたい場合は地図を動かしてから印刷してください。
+      中心位置は今地図に表示されている場所のまま、倍率だけ選んだ設定で印刷されます。別のエリアを印刷したい場合は、地図を動かしてからもう一度印刷ボタンを押してください。
     </div>
     <div class="export-row">
-      <button class="export-btn" id="printBtn">🖨️ 表示範囲の危険箇所を印刷</button>
+      <button class="export-btn" id="printBtn">🖨️ 表示範囲を印刷</button>
       <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
     </div>
     <div id="listBody">
@@ -837,30 +837,20 @@
     }
     document.body.classList.add("print-mode-single");
 
-    // "表示範囲の危険箇所を印刷": look at what's within the current on-screen
-    // view first, find the hazards in there, then center the map on those
-    // hazards at the chosen print zoom level (rather than just keeping
-    // whatever point happens to be in the middle of the screen).
-    const onScreenBounds = map.getBounds();
-    const candidates = reports.filter(r => isVisibleOnMap(r) && onScreenBounds.contains([r.lat, r.lng]));
-
-    if(candidates.length === 0){
-      toast("表示範囲内に、条件に合う報告がありません。地図を動かすか表示条件を確認してください");
-      document.body.classList.remove("print-mode-single");
-      return;
-    }
-
+    // "危険箇所を印刷": keep the map centered wherever the person has manually
+    // panned/zoomed it to (no auto-centering on hazards), and only change the
+    // zoom to the chosen print level. To print a different area, pan the map
+    // there and press the button again.
     const zoomSelect = document.getElementById("printZoomSelect");
     const printZoom = parseInt(zoomSelect.value, 10);
     const originalCenter = map.getCenter();
     const originalZoom = map.getZoom();
-    const hazardCenter = L.latLngBounds(candidates.map(r=>[r.lat, r.lng])).getCenter();
 
-    map.setView(hazardCenter, printZoom, {animate:false});
+    map.setView(originalCenter, printZoom, {animate:false});
     map.invalidateSize();
 
     // Give newly-loaded tiles at the print zoom level a moment to render before
-    // reading the (now re-centered) bounds and opening the print dialog.
+    // reading the (now re-zoomed) bounds and opening the print dialog.
     setTimeout(()=>{
       // Re-check against the new bounds after recentering/re-zooming, so the
       // printed list lines up exactly with the pins visible on the printed map.
@@ -868,7 +858,7 @@
       const filtered = reports.filter(r => isVisibleOnMap(r) && bounds.contains([r.lat, r.lng]));
 
       if(filtered.length === 0){
-        toast("この倍率だと、条件に合う報告が画面に収まりません。倍率を下げてみてください");
+        toast("この倍率・表示範囲に、条件に合う報告がありません。地図を動かすか倍率を変えてください");
         map.setView(originalCenter, originalZoom, {animate:false});
         map.invalidateSize();
         document.body.classList.remove("print-mode-single");
