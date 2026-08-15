@@ -113,6 +113,10 @@
     font-size:16px;
     cursor:pointer;
   }
+  .locate-btn.locating{
+    opacity:.6;
+    cursor:default;
+  }
   .tap-banner{
     position:absolute;
     top:10px; left:50%; transform:translateX(-50%);
@@ -1331,9 +1335,19 @@
 
     document.getElementById("locateBtn").addEventListener("click", ()=>{
       if(!navigator.geolocation){ toast("この端末は位置情報に対応していません"); return; }
+      const btn = document.getElementById("locateBtn");
+      const originalLabel = btn.textContent;
+      btn.textContent = "…";
+      btn.disabled = true;
+      btn.classList.add("locating");
+      const restore = ()=>{
+        btn.textContent = originalLabel;
+        btn.disabled = false;
+        btn.classList.remove("locating");
+      };
       navigator.geolocation.getCurrentPosition(
-        pos=> map.setView([pos.coords.latitude, pos.coords.longitude], 15),
-        ()=> toast("現在地を取得できませんでした")
+        pos=>{ map.setView([pos.coords.latitude, pos.coords.longitude], 15); restore(); },
+        ()=>{ toast("現在地を取得できませんでした"); restore(); }
       );
     });
   }
