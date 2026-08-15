@@ -286,8 +286,12 @@
   .sev-filter-row input{width:15px; height:15px;}
 
   @media print{
-    @page{ size: landscape; margin: 12mm; }
+    @page{ size: landscape; margin: 10mm; }
     body{background:#fff;}
+
+    /* Printing uses the full landscape page width; the app's normal
+       narrow, centered mobile layout only applies on screen. */
+    .page{ max-width:none !important; margin:0 !important; padding:0 !important; }
 
     /* Hide everything inside the page by default; only the elements explicitly
        re-shown below are printed. This avoids leftover on-screen UI (headers,
@@ -298,26 +302,36 @@
     .list-section{ display:block !important; margin:0 !important; }
     #printArea{ display:block !important; }
 
-    /* "今の表示範囲を印刷": show the live on-screen map, then the text list. */
+    /* "表示範囲を印刷": show the live on-screen map (full page width), then the text list. */
     body.print-mode-single .map-card{
       display:block !important;
-      height:520px !important; max-height:none !important; min-height:0 !important;
+      width:100% !important; height:480px !important; max-height:none !important; min-height:0 !important;
       margin:0 0 14px 0 !important; border:1px solid #999 !important;
       break-after:page; page-break-after:always;
     }
 
     .print-card{display:block !important; border:1px solid #999; border-radius:0; margin-bottom:10px; padding:10px; break-inside:avoid;}
-    .print-map-card{
-      display:block !important; height:480px !important; border:1px solid #999 !important;
-      margin:0 0 14px 0 !important;
-    }
     .grid-map-page{break-after:page; page-break-after:always; break-inside:avoid; page-break-inside:avoid;}
     .grid-list-page{break-after:page; page-break-after:always;}
     .grid-list-page:last-child{break-after:auto; page-break-after:auto;}
     .leaflet-tile-pane{ filter: grayscale(1) contrast(1.05) !important; }
+
+    /* The grid-print maps are built off-screen (see .print-map-card base rule)
+       so Leaflet can measure their real pixel size before printing; in print
+       they're simply placed back into the normal page flow. */
+    .print-map-card{
+      position:static !important; left:auto !important; top:auto !important;
+      display:block !important; width:100% !important; height:480px !important;
+      border:1px solid #999 !important; margin:0 0 14px 0 !important;
+    }
+  }
+
+  /* Off-screen (not display:none) so Leaflet can size these grid-print maps
+     correctly the moment they're created, well before the print dialog opens. */
+  .print-map-card{
+    position:fixed; left:-9999px; top:0; width:760px; height:480px;
   }
   .print-card{display:none;}
-  .print-map-card{display:none;}
 </style>
 </head>
 <body>
@@ -457,7 +471,7 @@
       中心位置は今地図に表示されている場所のまま、倍率だけ選んだ設定で印刷されます。エリアを変えたい場合は地図を動かしてから印刷してください。
     </div>
     <div class="export-row">
-      <button class="export-btn" id="printBtn">🖨️ 今の表示範囲を印刷</button>
+      <button class="export-btn" id="printBtn">🖨️ 表示範囲を印刷</button>
       <button class="export-btn" id="printGridBtn">🗺️ 全域を分割印刷</button>
       <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
     </div>
@@ -1004,6 +1018,9 @@
               </div>
             `).join("");
       });
+
+      // Make sure each map's rendered tiles match its (now print-visible) size.
+      gridMaps.forEach(m=>m.invalidateSize());
 
       window.print();
 
