@@ -426,6 +426,16 @@
     <div class="tap-banner" id="tapBanner">地図をタップして位置を指定</div>
     <button class="locate-btn" id="locateBtn" title="現在地へ移動">◎</button>
   </div>
+  <div class="zoom-select-row" style="display:flex; align-items:center; gap:8px; margin:10px 16px 0 16px; font-size:12px; color:var(--ink-soft);">
+    <span>表示倍率：</span>
+    <select id="printZoomSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
+      <option value="14">広め</option>
+      <option value="15">やや広め</option>
+      <option value="16" selected>標準（道路が分かる程度）</option>
+      <option value="17">やや詳細</option>
+      <option value="18">詳細</option>
+    </select>
+  </div>
   <div class="sev-filter-row" id="sevFilterRow">
     <label><input type="checkbox" data-sev="high" checked> 危険</label>
     <label><input type="checkbox" data-sev="mid" checked> 要注意</label>
@@ -440,18 +450,8 @@
       <button type="button" class="list-tab" data-tab="resolved">解消済み</button>
     </div>
     <h2 id="listHeading">報告一覧</h2>
-    <div class="print-zoom-row" style="display:flex; align-items:center; gap:8px; margin:0 0 6px 0; font-size:12px; color:var(--ink-soft);">
-      <span>印刷時の地図倍率：</span>
-      <select id="printZoomSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
-        <option value="14">広め</option>
-        <option value="15">やや広め</option>
-        <option value="16" selected>標準（道路が分かる程度）</option>
-        <option value="17">やや詳細</option>
-        <option value="18">詳細</option>
-      </select>
-    </div>
     <div class="print-zoom-row" style="font-size:12px; color:var(--ink-soft); margin:0 0 10px 0;">
-      中心位置は今地図に表示されている場所のまま、倍率だけ選んだ設定で印刷されます。別のエリアを印刷したい場合は、地図を動かしてからもう一度印刷ボタンを押してください。
+      印刷は、今地図に表示されている位置・倍率（上の「表示倍率」）がそのまま使われます。別のエリアを印刷したい場合は、地図を動かしてからもう一度印刷ボタンを押してください。
     </div>
     <div class="export-row">
       <button class="export-btn" id="printBtn">🖨️ 表示範囲を印刷</button>
@@ -529,6 +529,15 @@
     toast._timer = setTimeout(()=>t.classList.remove("show"), isError ? 7000 : 2400);
   }
 
+  const PRINT_ZOOM_LEVELS = [14, 15, 16, 17, 18];
+  let isSnappingZoom = false; // guards against the setZoom() below re-triggering itself
+
+  function nearestPrintZoom(z){
+    return PRINT_ZOOM_LEVELS.reduce((best, lvl) =>
+      Math.abs(lvl - z) < Math.abs(best - z) ? lvl : best
+    );
+  }
+
   function initMap(){
     map = L.map("map", {zoomControl:false}).setView(KUMAMOTO_CENTER, 12);
     L.control.zoom({position:"topright"}).addTo(map);
@@ -545,6 +554,27 @@
       updateLocStatus();
       setTapMode(false);
       toast("位置を設定しました");
+    });
+
+    // Keep the map's zoom snapped to one of the 5 preset levels (so printing
+    // is always consistent), whether the person pinch-zoomed, used the +/-
+    // buttons, or picked a level from the dropdown. Also keeps the dropdown's
+    // displayed value in sync with whatever the map is actually showing.
+    map.on("zoomend", ()=>{
+      if(isSnappingZoom) return;
+      const current = map.getZoom();
+      // Leave wide, whole-area browsing (zoomed out below the print range)
+      // alone — snapping only matters once the user is at a close-up,
+      // print-relevant zoom level.
+      if(current < PRINT_ZOOM_LEVELS[0] - 1) return;
+      const nearest = nearestPrintZoom(current);
+      const select = document.getElementById("printZoomSelect");
+      if(current !== nearest){
+        isSnappingZoom = true;
+        map.setZoom(nearest);
+        isSnappingZoom = false;
+      }
+      if(select) select.value = String(nearest);
     });
 
     window.addEventListener("resize", ()=> map.invalidateSize());
@@ -837,66 +867,49 @@
     }
     document.body.classList.add("print-mode-single");
 
-    // "危険箇所を印刷": keep the map centered wherever the person has manually
-    // panned/zoomed it to (no auto-centering on hazards), and only change the
-    // zoom to the chosen print level. To print a different area, pan the map
-    // there and press the button again.
-    const zoomSelect = document.getElementById("printZoomSelect");
-    const printZoom = parseInt(zoomSelect.value, 10);
-    const originalCenter = map.getCenter();
-    const originalZoom = map.getZoom();
+    // "表示範囲を印刷": the map's zoom is already kept snapped to one of the
+    // 5 preset print levels (see the zoomend handler in initMap), and the
+    // "表示倍率" dropdown always reflects it. So printing simply uses
+    // whatever the map is currently showing — no last-minute zoom change
+    // needed, which is what caused pins to unexpectedly fall outside the
+    // view before.
+    const bounds = map.getBounds();
+    const filtered = reports.filter(r => isVisibleOnMap(r) && bounds.contains([r.lat, r.lng]));
 
-    map.setView(originalCenter, printZoom, {animate:false});
-    map.invalidateSize();
+    if(filtered.length === 0){
+      toast("今の表示範囲に、条件に合う報告がありません。地図を動かすか表示条件を確認してください");
+      document.body.classList.remove("print-mode-single");
+      return;
+    }
 
-    // Give newly-loaded tiles at the print zoom level a moment to render before
-    // reading the (now re-zoomed) bounds and opening the print dialog.
-    setTimeout(()=>{
-      // Re-check against the new bounds after recentering/re-zooming, so the
-      // printed list lines up exactly with the pins visible on the printed map.
-      const bounds = map.getBounds();
-      const filtered = reports.filter(r => isVisibleOnMap(r) && bounds.contains([r.lat, r.lng]));
-
-      if(filtered.length === 0){
-        toast("この倍率・表示範囲に、条件に合う報告がありません。地図を動かすか倍率を変えてください");
-        map.setView(originalCenter, originalZoom, {animate:false});
-        map.invalidateSize();
-        document.body.classList.remove("print-mode-single");
-        return;
-      }
-
-      const numberMap = buildNumberMap();
-      const sorted = [...filtered].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
-      const area = document.getElementById("printArea");
-      area.innerHTML = `
+    const numberMap = buildNumberMap();
+    const sorted = [...filtered].sort((a,b)=> (a.resolved===b.resolved) ? (numberMap[a.id]-numberMap[b.id]) : (a.resolved?1:-1));
+    const area = document.getElementById("printArea");
+    area.innerHTML = `
+      <div class="print-card" style="display:block;">
+        <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
+        <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示範囲内：${sorted.length}件</p>
+      </div>
+      ${sorted.map(r=>`
         <div class="print-card" style="display:block;">
-          <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
-          <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示範囲内：${sorted.length}件</p>
-        </div>
-        ${sorted.map(r=>`
-          <div class="print-card" style="display:block;">
-            <div style="font-weight:700; font-size:14px;">
-              No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
-            </div>
-            <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
-            <div style="font-size:12px; color:#444;">
-              位置：${escapeHtml(displayLocation(r))}<br>
-              報告者：${escapeHtml(r.reporterName || "匿名")}／日時：${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""}
-            </div>
+          <div style="font-weight:700; font-size:14px;">
+            No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
           </div>
-        `).join("")}
-      `;
+          <div style="font-size:13px; margin:4px 0;">状況：${escapeHtml(r.comment || "（メモなし）")}</div>
+          <div style="font-size:12px; color:#444;">
+            位置：${escapeHtml(displayLocation(r))}<br>
+            報告者：${escapeHtml(r.reporterName || "匿名")}／日時：${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""}
+          </div>
+        </div>
+      `).join("")}
+    `;
 
-      window.print();
+    window.print();
 
-      // Restore the original on-screen view once the print dialog is dismissed.
-      setTimeout(()=>{
-        map.setView(originalCenter, originalZoom, {animate:false});
-        map.invalidateSize();
-        document.body.classList.remove("print-mode-single");
-        area.innerHTML = "";
-      }, 300);
-    }, 350);
+    setTimeout(()=>{
+      document.body.classList.remove("print-mode-single");
+      area.innerHTML = "";
+    }, 300);
   }
 
   function exportCSV(){
@@ -1195,6 +1208,10 @@
 
     document.getElementById("refreshBtn").addEventListener("click", ()=>{
       toast("この地図はリアルタイムで自動更新されています");
+    });
+
+    document.getElementById("printZoomSelect").addEventListener("change", (e)=>{
+      map.setZoom(parseInt(e.target.value, 10));
     });
 
     document.querySelectorAll(".sev-opt").forEach(el=>{
