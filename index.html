@@ -287,23 +287,34 @@
 
   @media print{
     @page{ size: landscape; margin: 12mm; }
-    .gate, .conn-badge, .action-bar, .form-panel, .map-note, .export-row, .refresh-btn, .toast,
-    .sev-filter-row, .locate-btn, .tap-banner, .leaflet-control-zoom, .list-tabs, .print-zoom-row{
-      display:none !important;
-    }
     body{background:#fff;}
-    .map-card{
+
+    /* Hide everything inside the page by default; only the elements explicitly
+       re-shown below are printed. This avoids leftover on-screen UI (headers,
+       stats, the live report list with its edit/resolve buttons, etc.) bleeding
+       into the printout. */
+    .page > *{ display:none !important; }
+    .list-section > *{ display:none !important; }
+    .list-section{ display:block !important; margin:0 !important; }
+    #printArea{ display:block !important; }
+
+    /* "今の表示範囲を印刷": show the live on-screen map, then the text list. */
+    body.print-mode-single .map-card{
+      display:block !important;
       height:520px !important; max-height:none !important; min-height:0 !important;
       margin:0 0 14px 0 !important; border:1px solid #999 !important;
       break-after:page; page-break-after:always;
     }
+
     .print-card{display:block !important; border:1px solid #999; border-radius:0; margin-bottom:10px; padding:10px; break-inside:avoid;}
     .print-map-card{
       display:block !important; height:480px !important; border:1px solid #999 !important;
       margin:0 0 14px 0 !important;
     }
-    .grid-page{break-after:page; page-break-after:always;}
-    .grid-page:last-child{break-after:auto; page-break-after:auto;}
+    .grid-map-page{break-after:page; page-break-after:always; break-inside:avoid; page-break-inside:avoid;}
+    .grid-list-page{break-after:page; page-break-after:always;}
+    .grid-list-page:last-child{break-after:auto; page-break-after:auto;}
+    .leaflet-tile-pane{ filter: grayscale(1) contrast(1.05) !important; }
   }
   .print-card{display:none;}
   .print-map-card{display:none;}
@@ -356,7 +367,7 @@
       <label>写真</label>
       <div class="photo-input">
         <label class="photo-btn" id="photoLabel">
-          タップして撮影・選択
+          <span id="photoLabelText">タップして撮影・選択</span>
           <input type="file" accept="image/*" capture="environment" id="photoInput" style="display:none">
         </label>
         <img id="photoPreview" class="photo-preview">
@@ -447,11 +458,11 @@
     </div>
     <div class="export-row">
       <button class="export-btn" id="printBtn">🖨️ 今の表示範囲を印刷</button>
-      <button class="export-btn" id="printGridBtn">🗺️ 全域を自動分割して印刷</button>
+      <button class="export-btn" id="printGridBtn">🗺️ 全域を分割印刷</button>
       <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
     </div>
     <div class="print-zoom-row" style="font-size:11px; color:var(--ink-soft); margin:-4px 0 10px 0;">
-      「全域を自動分割して印刷」は、表示条件（危険度・解消済み）に一致する報告すべてを、選んだ倍率のまま複数ページに分けて印刷します。
+      「全域を分割印刷」は、表示条件（危険度・解消済み）に一致する報告すべてを、選んだ倍率のまま複数ページに分けて印刷します。
     </div>
     <div id="listBody">
       <div class="empty-state">読み込み中…</div>
@@ -617,6 +628,10 @@
     await db.ref("reports/" + id).update({resolved:true});
   }
 
+  async function markUnresolved(id){
+    await db.ref("reports/" + id).update({resolved:false});
+  }
+
   function loadSavedName(){
     try{
       const v = localStorage.getItem(NAME_KEY);
@@ -746,7 +761,9 @@
             <div style="display:flex; gap:12px; margin-top:6px; flex-wrap:wrap;">
               <button class="report-goto-link" data-id="${r.id}" style="border:none;background:none;color:var(--ink-soft);font-size:12px;text-decoration:underline;padding:0;cursor:pointer;">地図で見る</button>
               <button class="report-edit-link" data-id="${r.id}" style="border:none;background:none;color:var(--ink-soft);font-size:12px;text-decoration:underline;padding:0;cursor:pointer;">編集する</button>
-              ${r.resolved ? "" : `<button class="resolve-link" data-id="${r.id}" style="margin-top:0;">解消済みにする</button>`}
+              ${r.resolved
+                ? `<button class="unresolve-link" data-id="${r.id}" style="border:none;background:none;color:var(--ink-soft);font-size:12px;text-decoration:underline;padding:0;cursor:pointer;">未解消に戻す</button>`
+                : `<button class="resolve-link" data-id="${r.id}" style="margin-top:0;">解消済みにする</button>`}
             </div>
           </div>
         </div>`;
@@ -789,6 +806,21 @@
         }
       });
     });
+
+    body.querySelectorAll(".unresolve-link").forEach(el=>{
+      el.addEventListener("click", async ()=>{
+        el.disabled = true;
+        el.textContent = "更新中…";
+        try{
+          await markUnresolved(el.dataset.id);
+          toast("未解消に戻しました");
+        }catch(e){
+          toast("更新に失敗しました: " + (e.message||e), true);
+          el.disabled = false;
+          el.textContent = "未解消に戻す";
+        }
+      });
+    });
   }
 
   function escapeHtml(s){
@@ -810,6 +842,8 @@
       toast("まだ報告がありません");
       return;
     }
+    document.body.classList.remove("print-mode-grid");
+    document.body.classList.add("print-mode-single");
 
     // Apply the chosen print zoom level, keeping the current on-screen center.
     const zoomSelect = document.getElementById("printZoomSelect");
@@ -832,6 +866,7 @@
         toast("この倍率・表示範囲に、条件に合う報告がありません。地図を動かすか倍率を変えてください");
         map.setView(originalCenter, originalZoom, {animate:false});
         map.invalidateSize();
+        document.body.classList.remove("print-mode-single");
         return;
       }
 
@@ -863,6 +898,8 @@
       setTimeout(()=>{
         map.setView(originalCenter, originalZoom, {animate:false});
         map.invalidateSize();
+        document.body.classList.remove("print-mode-single");
+        area.innerHTML = "";
       }, 300);
     }, 350);
   }
@@ -881,6 +918,8 @@
       toast("表示条件（危険度・解消済み）に一致する報告がありません");
       return;
     }
+    document.body.classList.remove("print-mode-single");
+    document.body.classList.add("print-mode-grid");
 
     const zoom = parseInt(document.getElementById("printZoomSelect").value, 10);
     const PAGE_PX = {w: 760, h: 480};   // approximate printed map size at this zoom
@@ -909,7 +948,10 @@
 
     if(totalPages > 12){
       const ok = window.confirm(`この倍率だと ${totalPages} ページになります（多めです）。倍率を下げると枚数を減らせます。このまま続けますか？`);
-      if(!ok) return;
+      if(!ok){
+        document.body.classList.remove("print-mode-grid");
+        return;
+      }
     }
 
     const centers = [];
@@ -925,12 +967,17 @@
     const numberMap = buildNumberMap();
     const area = document.getElementById("printArea");
     area.innerHTML = centers.map((c,i)=>`
-      <div class="grid-page">
+      <div class="grid-map-page">
         <div class="print-card" style="display:block;">
-          <h1 style="font-size:16px; margin:0 0 4px 0;">熊本配達危険マップ（${i+1}/${centers.length}ページ目）</h1>
+          <h1 style="font-size:16px; margin:0 0 4px 0;">熊本配達危険マップ（${i+1}/${centers.length}エリア・地図）</h1>
           <p style="font-size:11px; color:#666; margin:0 0 8px 0;">出力日時：${new Date().toLocaleString("ja-JP")}</p>
         </div>
         <div class="print-map-card" id="gridmap-${i}"></div>
+      </div>
+      <div class="grid-list-page">
+        <div class="print-card" style="display:block;">
+          <h1 style="font-size:16px; margin:0 0 4px 0;">熊本配達危険マップ（${i+1}/${centers.length}エリア・一覧）</h1>
+        </div>
         <div id="gridlist-${i}"></div>
       </div>
     `).join("");
@@ -963,6 +1010,7 @@
       setTimeout(()=>{
         gridMaps.forEach(m=>m.remove());
         area.innerHTML = "";
+        document.body.classList.remove("print-mode-grid");
       }, 300);
     }, 700);
   }
@@ -1061,28 +1109,41 @@
     });
   }
 
+  function byId(id){
+    return document.getElementById(id);
+  }
+
   function resetForm(){
-    selectedSeverity = null;
-    selectedLatLng = null;
-    compressedPhoto = null;
-    selectedTags.clear();
-    document.getElementById("editingId").value = "";
-    document.getElementById("formTitle").textContent = "危険箇所を報告";
-    document.getElementById("submitBtn").textContent = "この内容で報告する";
-    document.querySelectorAll(".sev-opt").forEach(el=>el.classList.remove("active"));
-    document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
-    document.getElementById("commentInput").value = "";
-    document.getElementById("photoPreview").style.display = "none";
-    document.getElementById("photoInput").value = "";
-    document.getElementById("photoLabel").textContent = "タップして撮影・選択";
-    document.getElementById("addressInput").value = "";
-    document.getElementById("addressInput").style.display = "none";
-    updateLocStatus();
+    try{
+      selectedSeverity = null;
+      selectedLatLng = null;
+      compressedPhoto = null;
+      selectedTags.clear();
+      if(byId("editingId")) byId("editingId").value = "";
+      if(byId("formTitle")) byId("formTitle").textContent = "危険箇所を報告";
+      if(byId("submitBtn")) byId("submitBtn").textContent = "この内容で報告する";
+      document.querySelectorAll(".sev-opt").forEach(el=>el.classList.remove("active"));
+      document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
+      if(byId("commentInput")) byId("commentInput").value = "";
+      if(byId("photoPreview")) byId("photoPreview").style.display = "none";
+      if(byId("photoInput")) byId("photoInput").value = "";
+      if(byId("photoLabelText")) byId("photoLabelText").textContent = "タップして撮影・選択";
+      if(byId("addressInput")){
+        byId("addressInput").value = "";
+        byId("addressInput").style.display = "none";
+      }
+      updateLocStatus();
+    }catch(e){
+      // A UI-reset hiccup should never be mistaken for a save failure or block
+      // subsequent actions (like opening the edit form) — log and move on.
+      console.warn("resetForm skipped a step:", e);
+    }
   }
 
   function updateLocStatus(){
     const el = document.getElementById("locStatus");
     const addrInput = document.getElementById("addressInput");
+    if(!el || !addrInput) return;
     if(selectedLatLng){
       el.textContent = `設定済み（${selectedLatLng.lat.toFixed(5)}, ${selectedLatLng.lng.toFixed(5)}）`;
       el.className = "loc-status ok";
@@ -1189,43 +1250,50 @@
 
   function openEditForm(r){
     resetForm();
-    document.getElementById("editingId").value = r.id;
-    document.getElementById("formTitle").textContent = "報告を編集";
-    document.getElementById("submitBtn").textContent = "この内容で更新する";
+    try{
+      if(byId("editingId")) byId("editingId").value = r.id;
+      if(byId("formTitle")) byId("formTitle").textContent = "報告を編集";
+      if(byId("submitBtn")) byId("submitBtn").textContent = "この内容で更新する";
 
-    selectedSeverity = r.severity;
-    document.querySelectorAll(".sev-opt").forEach(el=>{
-      el.classList.toggle("active", el.dataset.sev === r.severity);
-    });
+      selectedSeverity = r.severity;
+      document.querySelectorAll(".sev-opt").forEach(el=>{
+        el.classList.toggle("active", el.dataset.sev === r.severity);
+      });
 
-    selectedTags.clear();
-    if(r.tags){
-      r.tags.split("・").filter(Boolean).forEach(t=>selectedTags.add(t));
+      selectedTags.clear();
+      if(r.tags){
+        r.tags.split("・").filter(Boolean).forEach(t=>selectedTags.add(t));
+      }
+      document.querySelectorAll(".tag-opt").forEach(el=>{
+        el.classList.toggle("active", selectedTags.has(el.dataset.tag));
+      });
+      if(byId("commentInput")) byId("commentInput").value = (r.note !== undefined) ? r.note : (r.comment || "");
+
+      selectedLatLng = {lat:r.lat, lng:r.lng};
+      updateLocStatus();
+      const addrInput = byId("addressInput");
+      if(addrInput && r.address){
+        addrInput.value = r.address;
+        addrInput.disabled = false;
+        addrInput.style.display = "block";
+      }
+
+      if(r.photo){
+        compressedPhoto = r.photo;
+        const preview = byId("photoPreview");
+        if(preview){
+          preview.src = r.photo;
+          preview.style.display = "block";
+        }
+        if(byId("photoLabelText")) byId("photoLabelText").textContent = "写真を変更";
+      }
+
+      if(byId("nameInput")) byId("nameInput").value = r.reporterName || byId("nameInput").value;
+    }catch(e){
+      console.warn("openEditForm: some fields could not be pre-filled:", e);
+      toast("一部の項目を復元できませんでした。内容を確認してください", true);
     }
-    document.querySelectorAll(".tag-opt").forEach(el=>{
-      el.classList.toggle("active", selectedTags.has(el.dataset.tag));
-    });
-    document.getElementById("commentInput").value = (r.note !== undefined) ? r.note : (r.comment || "");
-
-    selectedLatLng = {lat:r.lat, lng:r.lng};
-    updateLocStatus();
-    const addrInput = document.getElementById("addressInput");
-    if(r.address){
-      addrInput.value = r.address;
-      addrInput.disabled = false;
-      addrInput.style.display = "block";
-    }
-
-    if(r.photo){
-      compressedPhoto = r.photo;
-      const preview = document.getElementById("photoPreview");
-      preview.src = r.photo;
-      preview.style.display = "block";
-      document.getElementById("photoLabel").textContent = "写真を変更";
-    }
-
-    document.getElementById("nameInput").value = r.reporterName || document.getElementById("nameInput").value;
-
+    // Always open the modal, even if a field above couldn't be pre-filled.
     openModal();
   }
 
