@@ -105,18 +105,24 @@
     left:10px;
     bottom:10px;
     z-index:15;
+    display:flex;
+    align-items:center;
+    justify-content:center;
     background:var(--card);
     border:1px solid var(--line);
     border-radius:50%;
-    width:40px; height:40px;
-    box-shadow:0 2px 6px rgba(0,0,0,.15);
-    font-size:16px;
+    width:44px; height:44px;
+    box-shadow:0 2px 6px rgba(0,0,0,.18);
     cursor:pointer;
+    padding:0;
   }
+  .locate-btn svg{ width:22px; height:22px; }
   .locate-btn.locating{
-    opacity:.6;
+    opacity:.55;
     cursor:default;
   }
+  .locate-btn.locating svg{ animation:locate-spin 1s linear infinite; }
+  @keyframes locate-spin{ to{ transform:rotate(360deg); } }
   .tap-banner{
     position:absolute;
     top:10px; left:50%; transform:translateX(-50%);
@@ -432,7 +438,13 @@
   <div class="map-card">
     <div id="map"></div>
     <div class="tap-banner" id="tapBanner">地図をタップして位置を指定</div>
-    <button class="locate-btn" id="locateBtn" title="現在地へ移動">◎</button>
+    <button class="locate-btn" id="locateBtn" title="現在地へ移動">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="3" fill="#2B6CB0"/>
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="#2B6CB0" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="12" cy="12" r="7" stroke="#2B6CB0" stroke-width="1.6"/>
+      </svg>
+    </button>
   </div>
   <div class="zoom-select-row" style="display:flex; align-items:center; gap:8px; margin:10px 16px 0 16px; font-size:12px; color:var(--ink-soft);">
     <span>表示倍率：</span>
@@ -940,14 +952,32 @@
     map.invalidateSize();
 
     setTimeout(()=>{
-      window.print();
+      let reverted = false;
+      let fallbackTimer = null;
 
-      setTimeout(()=>{
+      const revert = ()=>{
+        if(reverted) return;
+        reverted = true;
+        if(fallbackTimer) clearTimeout(fallbackTimer);
+        window.removeEventListener("afterprint", revert);
         mapCard.setAttribute("style", prevStyle);
         map.invalidateSize();
         document.body.classList.remove("print-mode-single", "print-no-list");
         area.innerHTML = "";
-      }, 300);
+      };
+
+      // Desktop browsers keep the print/PDF preview open (and live-updating)
+      // for as long as the person is looking at it, so we must wait for the
+      // "afterprint" event (fired once that preview/dialog actually closes)
+      // rather than reverting on a fixed timer — otherwise the map shrinks
+      // back to its small on-screen size while the preview is still open,
+      // which is what caused the large blank margins.
+      window.addEventListener("afterprint", revert);
+      // Safety net in case a browser doesn't fire "afterprint" reliably
+      // (some mobile share-sheet print flows) — revert after a generous delay.
+      fallbackTimer = setTimeout(revert, 20000);
+
+      window.print();
     }, 500);
   }
 
@@ -1336,12 +1366,9 @@
     document.getElementById("locateBtn").addEventListener("click", ()=>{
       if(!navigator.geolocation){ toast("この端末は位置情報に対応していません"); return; }
       const btn = document.getElementById("locateBtn");
-      const originalLabel = btn.textContent;
-      btn.textContent = "…";
       btn.disabled = true;
       btn.classList.add("locating");
       const restore = ()=>{
-        btn.textContent = originalLabel;
         btn.disabled = false;
         btn.classList.remove("locating");
       };
