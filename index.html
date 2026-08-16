@@ -108,15 +108,15 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    background:var(--card);
-    border:1px solid var(--line);
+    background:#fff;
+    border:2px solid #fff;
     border-radius:50%;
     width:44px; height:44px;
-    box-shadow:0 2px 6px rgba(0,0,0,.18);
+    box-shadow:0 1px 4px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.12);
     cursor:pointer;
     padding:0;
   }
-  .locate-btn svg{ width:22px; height:22px; }
+  .locate-btn svg{ width:24px; height:24px; }
   .locate-btn.locating{
     opacity:.55;
     cursor:default;
@@ -947,6 +947,8 @@
     mapCard.style.setProperty("width", "277mm", "important");
     mapCard.style.setProperty("height", "180mm", "important");
     mapCard.style.setProperty("max-width", "none", "important");
+    mapCard.style.setProperty("max-height", "none", "important");
+    mapCard.style.setProperty("min-height", "0", "important");
     mapCard.style.setProperty("margin", "0 auto", "important");
     mapCard.style.setProperty("border", "1px solid #999", "important");
     map.invalidateSize();
