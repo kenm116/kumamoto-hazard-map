@@ -1095,7 +1095,11 @@
       if(byId("editingId")) byId("editingId").value = "";
       if(byId("formTitle")) byId("formTitle").textContent = "危険箇所を報告";
       if(byId("submitBtn")) byId("submitBtn").textContent = "この内容で報告する";
-      if(byId("deleteReportBtn")) byId("deleteReportBtn").style.display = "none";
+      if(byId("deleteReportBtn")){
+        byId("deleteReportBtn").style.display = "none";
+        byId("deleteReportBtn").disabled = false;
+        byId("deleteReportBtn").textContent = "この報告を削除する";
+      }
       document.querySelectorAll(".sev-opt").forEach(el=>el.classList.remove("active"));
       document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
       if(byId("commentInput")) byId("commentInput").value = "";
