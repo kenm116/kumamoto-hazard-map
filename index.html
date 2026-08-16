@@ -104,7 +104,7 @@
     position:absolute;
     left:10px;
     bottom:10px;
-    z-index:15;
+    z-index:1000;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -128,7 +128,7 @@
     top:10px; left:50%; transform:translateX(-50%);
     background:var(--ink); color:#fff;
     padding:6px 12px; border-radius:16px;
-    font-size:11px; z-index:20; display:none;
+    font-size:11px; z-index:1000; display:none;
   }
   .map-note{
     font-size:11px; color:var(--ink-soft);
@@ -433,6 +433,7 @@
     </div>
 
     <button class="submit-btn" id="submitBtn">この内容で報告する</button>
+    <button type="button" id="deleteReportBtn" style="display:none; width:100%; margin-top:10px; border:1px solid var(--danger); background:#fff; color:var(--danger); border-radius:10px; padding:12px; font-size:14px; font-weight:700; cursor:pointer;">この報告を削除する</button>
   </section>
 
   <div class="map-card">
@@ -679,6 +680,10 @@
 
   async function updateReport(id, patch){
     await db.ref("reports/" + id).update(patch);
+  }
+
+  async function deleteReport(id){
+    await db.ref("reports/" + id).remove();
   }
 
   async function markResolved(id){
@@ -1090,6 +1095,7 @@
       if(byId("editingId")) byId("editingId").value = "";
       if(byId("formTitle")) byId("formTitle").textContent = "危険箇所を報告";
       if(byId("submitBtn")) byId("submitBtn").textContent = "この内容で報告する";
+      if(byId("deleteReportBtn")) byId("deleteReportBtn").style.display = "none";
       document.querySelectorAll(".sev-opt").forEach(el=>el.classList.remove("active"));
       document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
       if(byId("commentInput")) byId("commentInput").value = "";
@@ -1222,6 +1228,7 @@
       if(byId("editingId")) byId("editingId").value = r.id;
       if(byId("formTitle")) byId("formTitle").textContent = "報告を編集";
       if(byId("submitBtn")) byId("submitBtn").textContent = "この内容で更新する";
+      if(byId("deleteReportBtn")) byId("deleteReportBtn").style.display = "block";
 
       selectedSeverity = r.severity;
       document.querySelectorAll(".sev-opt").forEach(el=>{
@@ -1364,6 +1371,26 @@
 
     document.getElementById("tapBtn").addEventListener("click", ()=>setTapMode(true));
     document.getElementById("submitBtn").addEventListener("click", handleSubmit);
+
+    document.getElementById("deleteReportBtn").addEventListener("click", async ()=>{
+      const id = document.getElementById("editingId").value;
+      if(!id) return;
+      const sure = window.confirm("この報告を削除します。この操作は取り消せません。よろしいですか？");
+      if(!sure) return;
+      const btn = document.getElementById("deleteReportBtn");
+      btn.disabled = true;
+      btn.textContent = "削除中…";
+      try{
+        await deleteReport(id);
+        toast("報告を削除しました");
+        closeModal();
+        resetForm();
+      }catch(e){
+        toast("削除に失敗しました: " + (e.message||e), true);
+        btn.disabled = false;
+        btn.textContent = "この報告を削除する";
+      }
+    });
 
     document.getElementById("locateBtn").addEventListener("click", ()=>{
       if(!navigator.geolocation){ toast("この端末は位置情報に対応していません"); return; }
