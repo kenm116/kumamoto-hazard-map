@@ -104,7 +104,7 @@
     position:absolute;
     left:10px;
     bottom:10px;
-    z-index:1000;
+    z-index:900;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -128,7 +128,7 @@
     top:10px; left:50%; transform:translateX(-50%);
     background:var(--ink); color:#fff;
     padding:6px 12px; border-radius:16px;
-    font-size:11px; z-index:1000; display:none;
+    font-size:11px; z-index:900; display:none;
   }
   .map-note{
     font-size:11px; color:var(--ink-soft);
@@ -1406,7 +1406,7 @@
         btn.classList.remove("locating");
       };
       navigator.geolocation.getCurrentPosition(
-        pos=>{ map.setView([pos.coords.latitude, pos.coords.longitude], 15); restore(); },
+        pos=>{ map.setView([pos.coords.latitude, pos.coords.longitude], map.getZoom()); restore(); },
         ()=>{ toast("現在地を取得できませんでした"); restore(); }
       );
     });
