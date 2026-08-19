@@ -347,8 +347,17 @@
 
 <div class="page">
   <header>
-    <h1>危険箇所マップ</h1>
+    <h1>危険箇所マップ <span id="roleBadge" style="display:none; font-size:12px; font-weight:700; color:#fff; background:#5B6B7A; padding:3px 9px; border-radius:20px; vertical-align:middle;">管理者モード</span></h1>
     <p id="headerSubtitle">熊本地震・配達ルート情報共有</p>
+    <div class="print-zoom-row" id="adminDisasterRow" style="display:none; align-items:center; gap:8px; margin:10px 0 4px 0; font-size:12px; color:var(--ink-soft);">
+      <span>表示する災害：</span>
+      <select id="adminDisasterSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
+        <option value="">すべての災害</option>
+      </select>
+    </div>
+    <div id="scopeWarning" style="display:none; margin:0 0 10px 0; font-size:12px; color:var(--danger); font-weight:700;">
+      「すべての災害」を表示中は新しい報告を登録できません。上で特定の災害を選んでください。
+    </div>
     <div class="stats">
       <div class="stat-pill"><b id="stat-total">0</b> 件</div>
       <div class="stat-pill danger"><b id="stat-open">0</b> 未解消</div>
@@ -457,12 +466,6 @@
       <option value="18">詳細</option>
     </select>
   </div>
-  <div class="print-zoom-row" id="adminDisasterRow" style="display:none; align-items:center; gap:8px; margin:10px 16px 0 16px; font-size:12px; color:var(--ink-soft);">
-    <span>表示する災害：</span>
-    <select id="adminDisasterSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
-      <option value="">すべての災害</option>
-    </select>
-  </div>
   <div class="sev-filter-row" id="sevFilterRow">
     <label><input type="checkbox" data-sev="high" checked> 危険</label>
     <label><input type="checkbox" data-sev="mid" checked> 要注意</label>
@@ -470,9 +473,6 @@
     <label><input type="checkbox" id="showResolvedOnMap"> 解消済みも表示</label>
   </div>
   <div class="map-note">ピンをタップすると詳細が見られます。番号は一覧の番号と対応しています。ピンの色／周囲の円：赤=危険／橙=要注意／灰=警戒</div>
-  <div id="scopeWarning" style="display:none; margin:8px 16px 0 16px; font-size:12px; color:var(--danger); font-weight:700;">
-    「すべての災害」を表示中は新しい報告を登録できません。上のプルダウンで特定の災害を選んでから報告してください。
-  </div>
 
   <section class="list-section">
     <div class="list-tabs" id="listTabs">
@@ -498,6 +498,7 @@
   </div>
 
   <div style="text-align:center; margin:20px 0 10px 0;">
+    <button id="signOutBtn" type="button" style="border:none; background:none; color:var(--ink-soft); font-size:12px; text-decoration:underline; padding:6px; margin-right:14px;">サインアウト</button>
     <button id="adminLink" type="button" style="border:none; background:none; color:#B8B2A0; font-size:11px; text-decoration:underline; padding:6px;">危険箇所マップ</button>
   </div>
 </div>
@@ -523,10 +524,10 @@
   };
   // 2) 災害ごとの合言葉。新しい災害を追加する場合はこの配列に増やしてください。
   const DISASTERS = [
-    { passcode: "kumamoto20260728", name: "令和8年熊本地震" }
+    { passcode: "kumamoto2026", name: "令和8年熊本地震" }
   ];
   // 3) 管理者用の閲覧パスコード（全災害を横断して閲覧・編集できる簡易ゲート）
-  const ADMIN_GATE_PASSCODE = "kumamoto2026";
+  const ADMIN_GATE_PASSCODE = "kanri2026";
   // 4) 管理者ログイン（全データ削除用）はFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
   // ▲▲▲ ここまで ▲▲▲
 
@@ -1416,6 +1417,17 @@
     document.getElementById("csvBtn").addEventListener("click", exportCSV);
     document.getElementById("adminLink").addEventListener("click", handleAdminReset);
 
+    document.getElementById("signOutBtn").addEventListener("click", ()=>{
+      const sure = window.confirm("サインアウトしますか？次回開いたときは、もう一度合言葉の入力が必要になります。");
+      if(!sure) return;
+      try{
+        localStorage.removeItem(GATE_KEY);
+        localStorage.removeItem(ROLE_KEY);
+        localStorage.removeItem(DISASTER_KEY);
+      }catch(e){}
+      location.reload();
+    });
+
     document.getElementById("photoInput").addEventListener("change", async (e)=>{
       const file = e.target.files[0];
       if(!file) return;
@@ -1535,9 +1547,11 @@
 
   function applyRoleToHeader(){
     const subtitle = document.getElementById("headerSubtitle");
+    const badge = document.getElementById("roleBadge");
+    if(badge) badge.style.display = (userRole === "admin") ? "inline-block" : "none";
     if(subtitle){
       if(userRole === "admin"){
-        subtitle.textContent = "管理者モード（全災害を表示中）";
+        subtitle.textContent = "配達ルート情報共有";
       }else if(currentDisaster){
         subtitle.textContent = currentDisaster + "・配達ルート情報共有";
       }
