@@ -348,7 +348,7 @@
 <div class="page">
   <header>
     <h1>危険箇所マップ</h1>
-    <p>熊本地震・配達ルート情報共有</p>
+    <p id="headerSubtitle">熊本地震・配達ルート情報共有</p>
     <div class="stats">
       <div class="stat-pill"><b id="stat-total">0</b> 件</div>
       <div class="stat-pill danger"><b id="stat-open">0</b> 未解消</div>
@@ -457,6 +457,12 @@
       <option value="18">詳細</option>
     </select>
   </div>
+  <div class="print-zoom-row" id="adminDisasterRow" style="display:none; align-items:center; gap:8px; margin:10px 16px 0 16px; font-size:12px; color:var(--ink-soft);">
+    <span>表示する災害：</span>
+    <select id="adminDisasterSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
+      <option value="">すべての災害</option>
+    </select>
+  </div>
   <div class="sev-filter-row" id="sevFilterRow">
     <label><input type="checkbox" data-sev="high" checked> 危険</label>
     <label><input type="checkbox" data-sev="mid" checked> 要注意</label>
@@ -464,6 +470,9 @@
     <label><input type="checkbox" id="showResolvedOnMap"> 解消済みも表示</label>
   </div>
   <div class="map-note">ピンをタップすると詳細が見られます。番号は一覧の番号と対応しています。ピンの色／周囲の円：赤=危険／橙=要注意／灰=警戒</div>
+  <div id="scopeWarning" style="display:none; margin:8px 16px 0 16px; font-size:12px; color:var(--danger); font-weight:700;">
+    「すべての災害」を表示中は新しい報告を登録できません。上のプルダウンで特定の災害を選んでから報告してください。
+  </div>
 
   <section class="list-section">
     <div class="list-tabs" id="listTabs">
@@ -512,16 +521,25 @@
     messagingSenderId: "828112884275",
     appId: "1:828112884275:web:11dea040e7cafae231c946"
   };
-  // 2) 配達チーム内で決めた合言葉に変更する（第三者の悪戯アクセスを防ぐための簡易ゲート）
-  const TEAM_PASSCODE = "kumamoto2026";
-  // 3) 管理者用パスコード（全データ削除に使用。チーム内でも配達員全員には教えないでください）
-  // 3) 管理者ログインはFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
+  // 2) 災害ごとの合言葉。新しい災害を追加する場合はこの配列に増やしてください。
+  const DISASTERS = [
+    { passcode: "kumamoto20260728", name: "令和8年熊本地震" }
+  ];
+  // 3) 管理者用の閲覧パスコード（全災害を横断して閲覧・編集できる簡易ゲート）
+  const ADMIN_GATE_PASSCODE = "kumamoto2026";
+  // 4) 管理者ログイン（全データ削除用）はFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
   // ▲▲▲ ここまで ▲▲▲
 
   const GATE_KEY = "hazard-map-authed";
+  const ROLE_KEY = "hazard-map-role";       // "disaster" | "admin"
+  const DISASTER_KEY = "hazard-map-disaster"; // 選ばれた災害名（roleが"disaster"の時のみ使用）
   const KUMAMOTO_CENTER = [32.8032, 130.7079];
   const NAME_KEY = "reporter-name";
   let db, auth;
+
+  let userRole = null;          // "disaster" | "admin"
+  let currentDisaster = null;   // roleが"disaster"の人が所属する災害名
+  let adminDisasterFilter = null; // 管理者が絞り込み中の災害名（nullなら全件表示）
 
   const SEV_META = {
     high:  {label:"危険", color:"#C63D2F"},
@@ -711,22 +729,36 @@
   }
 
   function renderStats(){
-    const total = reports.length;
-    const resolved = reports.filter(r=>r.resolved).length;
+    const scoped = getScopedReports();
+    const total = scoped.length;
+    const resolved = scoped.filter(r=>r.resolved).length;
     document.getElementById("stat-total").textContent = total;
     document.getElementById("stat-open").textContent = total - resolved;
     document.getElementById("stat-resolved").textContent = resolved;
     document.getElementById("listHeading").textContent = `報告一覧（${total}件）`;
   }
 
+  function inScope(r){
+    if(userRole === "admin"){
+      if(adminDisasterFilter) return r.disaster === adminDisasterFilter;
+      return true; // 「すべての災害」表示中
+    }
+    return r.disaster === currentDisaster;
+  }
+
+  function getScopedReports(){
+    return (reports || []).filter(inScope);
+  }
+
   function buildNumberMap(){
-    const sorted = [...reports].sort((a,b)=> new Date(a.createdAt) - new Date(b.createdAt));
+    const sorted = getScopedReports().sort((a,b)=> new Date(a.createdAt) - new Date(b.createdAt));
     const map = {};
     sorted.forEach((r,i)=>{ map[r.id] = i+1; });
     return map;
   }
 
   function isVisibleOnMap(r){
+    if(!inScope(r)) return false;
     if(!visibleSeverities.has(r.severity)) return false;
     if(r.resolved && !document.getElementById("showResolvedOnMap").checked) return false;
     return true;
@@ -763,9 +795,11 @@
   function popupHtml(r, number){
     const meta = SEV_META[r.severity] || SEV_META.low;
     const dateStr = new Date(r.createdAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
+    const showDisasterBadge = (userRole === "admin" && !adminDisasterFilter);
     return `
       <div class="popup-body">
         <span class="tag" style="display:inline-block;font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;margin-bottom:5px;background:${r.resolved ? '#4C7A5E' : meta.color}">No.${number ?? ""} ${r.resolved ? "解消済み" : meta.label}</span>
+        ${showDisasterBadge ? `<span class="tag" style="display:inline-block;font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;margin-bottom:5px;margin-left:4px;background:#5B6B7A;">${escapeHtml(r.disaster || "未設定")}</span>` : ""}
         ${r.photo ? `<img src="${r.photo}" style="width:100%;border-radius:6px;margin-bottom:6px;display:block;">` : ""}
         <div style="font-size:11px;color:#6b6a63;margin-bottom:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
         <div>${escapeHtml(r.comment || "（メモなし）")}</div>
@@ -797,7 +831,9 @@
   function renderList(){
     const body = document.getElementById("listBody");
     const heading = document.getElementById("listHeading");
-    const filtered = reports.filter(r => activeListTab === "resolved" ? r.resolved : !r.resolved);
+    const scoped = getScopedReports();
+    const filtered = scoped.filter(r => activeListTab === "resolved" ? r.resolved : !r.resolved);
+    const showDisasterBadge = (userRole === "admin" && !adminDisasterFilter);
 
     heading.textContent = activeListTab === "resolved" ? `解消済み一覧（${filtered.length}件）` : `未解消一覧（${filtered.length}件）`;
 
@@ -817,6 +853,7 @@
           ${r.photo ? `<img src="${r.photo}">` : `<div style="width:64px;height:64px;border-radius:8px;background:#DFD9C8;flex-shrink:0;"></div>`}
           <div style="flex:1; min-width:0;">
             <span class="tag" style="background:${r.resolved ? 'var(--resolved)' : meta.color}">No.${numberMap[r.id]} ${r.resolved ? "解消済み" : meta.label}</span>
+            ${showDisasterBadge ? `<span class="tag" style="background:#5B6B7A;">${escapeHtml(r.disaster || "未設定")}</span>` : ""}
             <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
             <div class="comment">${escapeHtml(r.comment || "（メモなし）")}</div>
             <div class="meta">${escapeHtml(r.reporterName || "匿名")}・${dateStr}</div>
@@ -994,24 +1031,32 @@
   }
 
   function exportCSV(){
-    if(!reports || reports.length === 0){
+    const scoped = getScopedReports();
+    if(scoped.length === 0){
       toast("まだ報告がありません");
       return;
     }
+    const showDisasterCol = (userRole === "admin" && !adminDisasterFilter);
     const numberMap = buildNumberMap();
-    const header = ["番号","状態","危険度","タグ","補足メモ","住所","報告者","日時"];
-    const rows = [...reports]
+    const header = showDisasterCol
+      ? ["番号","災害名","状態","危険度","タグ","補足メモ","住所","報告者","日時"]
+      : ["番号","状態","危険度","タグ","補足メモ","住所","報告者","日時"];
+    const rows = [...scoped]
       .sort((a,b)=> numberMap[a.id]-numberMap[b.id])
-      .map(r=>[
-        numberMap[r.id],
-        r.resolved ? "解消済み" : "未解消",
-        SEV_LABEL[r.severity] || "",
-        r.tags != null ? r.tags : (r.comment || ""),
-        r.note != null ? r.note : "",
-        displayLocation(r),
-        r.reporterName || "",
-        r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""
-      ]);
+      .map(r=>{
+        const row = [numberMap[r.id]];
+        if(showDisasterCol) row.push(r.disaster || "未設定");
+        row.push(
+          r.resolved ? "解消済み" : "未解消",
+          SEV_LABEL[r.severity] || "",
+          r.tags != null ? r.tags : (r.comment || ""),
+          r.note != null ? r.note : "",
+          displayLocation(r),
+          r.reporterName || "",
+          r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : ""
+        );
+        return row;
+      });
     const csvEscape = v => `"${String(v).replace(/"/g,'""')}"`;
     const csv = "\uFEFF" + [header, ...rows].map(row=>row.map(csvEscape).join(",")).join("\r\n");
     const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
@@ -1182,6 +1227,19 @@
     if(!selectedSeverity){ toast("危険度を選択してください"); return; }
     if(!selectedLatLng){ toast("位置を設定してください"); return; }
 
+    const editingIdCheck = document.getElementById("editingId").value;
+    if(!editingIdCheck){
+      // New reports need an unambiguous disaster to belong to.
+      if(userRole === "admin" && !adminDisasterFilter){
+        toast("先に「表示する災害」で特定の災害を選んでから報告してください");
+        return;
+      }
+      if(userRole === "disaster" && !currentDisaster){
+        toast("災害情報が確認できません。ページを再読み込みしてください");
+        return;
+      }
+    }
+
     const name = document.getElementById("nameInput").value.trim();
     const tagsText = Array.from(selectedTags).join("・");
     const extraNote = document.getElementById("commentInput").value.trim();
@@ -1213,6 +1271,7 @@
         await updateReport(editingId, reportData);
         toast("報告を更新しました");
       }else{
+        reportData.disaster = (userRole === "admin") ? adminDisasterFilter : currentDisaster;
         reportData.resolved = false;
         reportData.createdAt = new Date().toISOString();
         await pushReport(reportData);
@@ -1290,7 +1349,13 @@
   }
 
   function initEvents(){
-    document.getElementById("addBtn").addEventListener("click", openModal);
+    document.getElementById("addBtn").addEventListener("click", ()=>{
+      if(userRole === "admin" && !adminDisasterFilter){
+        toast("先に「表示する災害」で特定の災害を選んでから報告してください");
+        return;
+      }
+      openModal();
+    });
     document.getElementById("formClose").addEventListener("click", closeModal);
 
     document.getElementById("refreshBtn").addEventListener("click", ()=>{
@@ -1299,6 +1364,12 @@
 
     document.getElementById("printZoomSelect").addEventListener("change", (e)=>{
       map.setZoom(parseInt(e.target.value, 10));
+    });
+
+    document.getElementById("adminDisasterSelect").addEventListener("change", (e)=>{
+      adminDisasterFilter = e.target.value || null;
+      updateScopeWarning();
+      renderAll();
     });
 
     document.querySelectorAll(".sev-opt").forEach(el=>{
@@ -1420,30 +1491,91 @@
   function tryUnlock(e){
     if(e) e.preventDefault();
     const val = document.getElementById("gateInput").value.trim();
-    if(val === TEAM_PASSCODE){
-      try{ localStorage.setItem(GATE_KEY, "1"); }catch(e){}
+
+    if(val === ADMIN_GATE_PASSCODE){
+      userRole = "admin";
+      currentDisaster = null;
+      try{
+        localStorage.setItem(GATE_KEY, "1");
+        localStorage.setItem(ROLE_KEY, "admin");
+        localStorage.removeItem(DISASTER_KEY);
+      }catch(e){}
       document.getElementById("gate").classList.add("hidden");
       start();
-    }else{
-      document.getElementById("gateErr").textContent = "合言葉が違います";
+      return false;
     }
+
+    const matched = DISASTERS.find(d => d.passcode === val);
+    if(matched){
+      userRole = "disaster";
+      currentDisaster = matched.name;
+      try{
+        localStorage.setItem(GATE_KEY, "1");
+        localStorage.setItem(ROLE_KEY, "disaster");
+        localStorage.setItem(DISASTER_KEY, matched.name);
+      }catch(e){}
+      document.getElementById("gate").classList.add("hidden");
+      start();
+      return false;
+    }
+
+    document.getElementById("gateErr").textContent = "合言葉が違います";
     return false;
   }
 
   function start(){
     if(window.__hazardMapStarted) return;
     window.__hazardMapStarted = true;
+    applyRoleToHeader();
     initMap();
     initEvents();
     loadSavedName();
     initFirebase();
   }
 
+  function applyRoleToHeader(){
+    const subtitle = document.getElementById("headerSubtitle");
+    if(subtitle){
+      if(userRole === "admin"){
+        subtitle.textContent = "管理者モード（全災害を表示中）";
+      }else if(currentDisaster){
+        subtitle.textContent = currentDisaster + "・配達ルート情報共有";
+      }
+    }
+    const adminRow = document.getElementById("adminDisasterRow");
+    if(adminRow) adminRow.style.display = (userRole === "admin") ? "flex" : "none";
+
+    if(userRole === "admin"){
+      const select = document.getElementById("adminDisasterSelect");
+      if(select && select.options.length <= 1){
+        DISASTERS.forEach(d=>{
+          const opt = document.createElement("option");
+          opt.value = d.name;
+          opt.textContent = d.name;
+          select.appendChild(opt);
+        });
+      }
+    }
+    updateScopeWarning();
+  }
+
+  function updateScopeWarning(){
+    const warn = document.getElementById("scopeWarning");
+    const addBtn = document.getElementById("addBtn");
+    const blocked = (userRole === "admin" && !adminDisasterFilter);
+    if(warn) warn.style.display = blocked ? "block" : "none";
+    if(addBtn) addBtn.style.opacity = blocked ? "0.5" : "1";
+  }
+
   document.getElementById("gateForm").addEventListener("submit", tryUnlock);
 
   let alreadyIn = false;
-  try{ alreadyIn = localStorage.getItem(GATE_KEY) === "1"; }catch(e){}
-  if(alreadyIn){
+  try{
+    alreadyIn = localStorage.getItem(GATE_KEY) === "1";
+    userRole = localStorage.getItem(ROLE_KEY) || null;
+    currentDisaster = localStorage.getItem(DISASTER_KEY) || null;
+  }catch(e){}
+  if(alreadyIn && userRole){
     document.getElementById("gate").classList.add("hidden");
     start();
   }
