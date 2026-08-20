@@ -486,6 +486,11 @@
     <button type="button" id="deleteReportBtn" style="display:none; width:100%; margin-top:10px; border:1px solid var(--danger); background:#fff; color:var(--danger); border-radius:10px; padding:12px; font-size:14px; font-weight:700; cursor:pointer;">この報告を削除する</button>
   </section>
 
+  <div class="pin-nav-row" id="pinNavRow" style="display:flex; gap:8px; margin:14px 16px 0 16px;">
+    <button type="button" class="export-btn" id="pinPrevBtn" style="flex:0 0 auto; padding:10px 14px;">◀ 前へ</button>
+    <button type="button" class="export-btn" id="pinLatestBtn" style="flex:1;">最新の報告へ</button>
+    <button type="button" class="export-btn" id="pinNextBtn" style="flex:0 0 auto; padding:10px 14px;">次へ ▶</button>
+  </div>
   <div class="map-card">
     <div id="map"></div>
     <div class="tap-banner" id="tapBanner">地図をタップして位置を指定</div>
@@ -940,14 +945,8 @@
       el.addEventListener("click", ()=>{
         const r = reports.find(x=>x.id===el.dataset.id);
         if(!r) return;
-        document.querySelector(".map-card").scrollIntoView({behavior:"smooth", block:"center"});
-        map.setView([r.lat, r.lng], 16);
-        setTimeout(()=>{
-          markersLayer.eachLayer(m=>{
-            const ll = m.getLatLng();
-            if(Math.abs(ll.lat-r.lat)<1e-9 && Math.abs(ll.lng-r.lng)<1e-9){ m.openPopup(); }
-          });
-        }, 400);
+        mapNavReportId = r.id;
+        goToReportOnMap(r);
       });
     });
 
@@ -1417,10 +1416,66 @@
     document.getElementById("formPanel").classList.remove("open");
   }
 
+  // Local mode: browsing photos within a single report / the in-progress
+  // report form (no crossing into other reports).
   let lightboxPhotos = [];
   let lightboxIndex = 0;
+  // Report mode: browsing crosses into the next/previous report (ordered by
+  // No.) once the current report's photos are exhausted.
+  let lightboxMode = "local"; // "local" | "report"
+  let lightboxContext = [];   // ordered reports (report mode only)
+  let lightboxReportIdx = 0;  // index into lightboxContext (report mode only)
+
+  function goToReportOnMap(r){
+    if(!r) return;
+    document.querySelector(".map-card").scrollIntoView({behavior:"smooth", block:"center"});
+    map.setView([r.lat, r.lng], map.getZoom());
+    setTimeout(()=>{
+      markersLayer.eachLayer(m=>{
+        const ll = m.getLatLng();
+        if(Math.abs(ll.lat-r.lat)<1e-9 && Math.abs(ll.lng-r.lng)<1e-9){ m.openPopup(); }
+      });
+    }, 300);
+  }
+
+  // Pins currently shown on the map (matches the severity/resolved
+  // checkboxes), ordered by No. — used for the "最新の報告へ／前へ／次へ" controls.
+  function buildMapPinContext(){
+    const numberMap = buildNumberMap();
+    return reports.filter(isVisibleOnMap).sort((a,b)=> numberMap[a.id]-numberMap[b.id]);
+  }
+
+  let mapNavReportId = null; // last report shown via 前へ／次へ／最新の報告へ
+
+  function goToLatestPin(){
+    const ctx = buildMapPinContext();
+    if(ctx.length === 0){ toast("表示条件に合う報告がありません"); return; }
+    const latest = ctx[ctx.length - 1];
+    mapNavReportId = latest.id;
+    goToReportOnMap(latest);
+  }
+
+  function stepMapPin(dir){
+    const ctx = buildMapPinContext();
+    if(ctx.length === 0){ toast("表示条件に合う報告がありません"); return; }
+    let idx = ctx.findIndex(r => r.id === mapNavReportId);
+    if(idx === -1){
+      idx = dir > 0 ? -1 : 0; // 未選択なら「次へ」で先頭、「前へ」で先頭のまま
+    }
+    idx = (idx + dir + ctx.length) % ctx.length;
+    mapNavReportId = ctx[idx].id;
+    goToReportOnMap(ctx[idx]);
+  }
+
+  function buildLightboxContext(){
+    const numberMap = buildNumberMap();
+    return getScopedReports()
+      .filter(r => getPhotos(r).length > 0)
+      .sort((a,b)=> numberMap[a.id] - numberMap[b.id]);
+  }
 
   function openLightbox(photos, index){
+    lightboxMode = "local";
     if(!photos || photos.length === 0) return;
     lightboxPhotos = photos;
     lightboxIndex = index;
@@ -1428,11 +1483,61 @@
     document.getElementById("lightbox").classList.add("open");
   }
 
+  function openLightboxForReport(reportId, photoIndex){
+    const context = buildLightboxContext();
+    if(context.length === 0) return;
+    let reportIdx = context.findIndex(r => r.id === reportId);
+    if(reportIdx === -1) reportIdx = 0;
+    lightboxMode = "report";
+    lightboxContext = context;
+    lightboxReportIdx = reportIdx;
+    lightboxIndex = photoIndex || 0;
+    renderLightbox();
+    document.getElementById("lightbox").classList.add("open");
+  }
+
+  function currentLightboxPhotos(){
+    if(lightboxMode === "report") return getPhotos(lightboxContext[lightboxReportIdx]);
+    return lightboxPhotos;
+  }
+
+  function lightboxStep(dir){
+    if(lightboxMode !== "report"){
+      const photos = lightboxPhotos;
+      lightboxIndex = (lightboxIndex + dir + photos.length) % photos.length;
+      renderLightbox();
+      return;
+    }
+    const photos = getPhotos(lightboxContext[lightboxReportIdx]);
+    let nextPhotoIdx = lightboxIndex + dir;
+    if(nextPhotoIdx >= 0 && nextPhotoIdx < photos.length){
+      lightboxIndex = nextPhotoIdx;
+    }else{
+      // Ran off the end of this report's photos: move to the next/previous
+      // report (wrapping around), landing on its first/last photo.
+      lightboxReportIdx = (lightboxReportIdx + dir + lightboxContext.length) % lightboxContext.length;
+      const newPhotos = getPhotos(lightboxContext[lightboxReportIdx]);
+      lightboxIndex = dir > 0 ? 0 : newPhotos.length - 1;
+    }
+    renderLightbox();
+  }
+
   function renderLightbox(){
-    document.getElementById("lightboxImg").src = lightboxPhotos[lightboxIndex];
-    document.getElementById("lightboxCount").textContent =
-      lightboxPhotos.length > 1 ? `${lightboxIndex+1} / ${lightboxPhotos.length}` : "";
-    const multi = lightboxPhotos.length > 1;
+    const photos = currentLightboxPhotos();
+    document.getElementById("lightboxImg").src = photos[lightboxIndex];
+
+    const countEl = document.getElementById("lightboxCount");
+    if(lightboxMode === "report"){
+      const r = lightboxContext[lightboxReportIdx];
+      const numberMap = buildNumberMap();
+      countEl.textContent = `No.${numberMap[r.id]} ・ 写真 ${lightboxIndex+1}/${photos.length}`;
+    }else{
+      countEl.textContent = photos.length > 1 ? `${lightboxIndex+1} / ${photos.length}` : "";
+    }
+
+    const multi = (lightboxMode === "report")
+      ? (lightboxContext.length > 1 || photos.length > 1)
+      : photos.length > 1;
     document.getElementById("lightboxPrev").style.display = multi ? "block" : "none";
     document.getElementById("lightboxNext").style.display = multi ? "block" : "none";
   }
@@ -1451,22 +1556,15 @@
       if(target.classList.contains("lightbox-local-photo")){
         openLightbox(selectedPhotos, idx);
       }else{
-        const r = reports.find(x=>x.id === target.dataset.reportId);
-        if(r) openLightbox(getPhotos(r), idx);
+        openLightboxForReport(target.dataset.reportId, idx);
       }
     });
     document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
     document.getElementById("lightbox").addEventListener("click", (e)=>{
       if(e.target.id === "lightbox") closeLightbox();
     });
-    document.getElementById("lightboxPrev").addEventListener("click", ()=>{
-      lightboxIndex = (lightboxIndex - 1 + lightboxPhotos.length) % lightboxPhotos.length;
-      renderLightbox();
-    });
-    document.getElementById("lightboxNext").addEventListener("click", ()=>{
-      lightboxIndex = (lightboxIndex + 1) % lightboxPhotos.length;
-      renderLightbox();
-    });
+    document.getElementById("lightboxPrev").addEventListener("click", ()=> lightboxStep(-1));
+    document.getElementById("lightboxNext").addEventListener("click", ()=> lightboxStep(1));
 
     document.getElementById("addBtn").addEventListener("click", ()=>{
       if(userRole === "admin" && !adminDisasterFilter){
@@ -1614,6 +1712,10 @@
         btn.textContent = "この報告を削除する";
       }
     });
+
+    document.getElementById("pinLatestBtn").addEventListener("click", goToLatestPin);
+    document.getElementById("pinPrevBtn").addEventListener("click", ()=> stepMapPin(-1));
+    document.getElementById("pinNextBtn").addEventListener("click", ()=> stepMapPin(1));
 
     document.getElementById("locateBtn").addEventListener("click", ()=>{
       if(!navigator.geolocation){ toast("この端末は位置情報に対応していません"); return; }
