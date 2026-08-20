@@ -217,6 +217,12 @@
     padding:14px; font-size:12px; color:var(--ink-soft); text-align:center; flex:1; cursor:pointer;
   }
   .photo-preview{width:64px; height:64px; border-radius:8px; object-fit:cover; display:none; border:1px solid var(--line);}
+  .photo-thumb{position:relative; width:64px; height:64px;}
+  .photo-thumb img{width:64px; height:64px; border-radius:8px; object-fit:cover; border:1px solid var(--line); display:block;}
+  .photo-thumb .photo-thumb-remove{
+    position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%;
+    background:var(--danger); color:#fff; border:none; font-size:12px; line-height:1; cursor:pointer;
+  }
 
   .loc-row{display:flex; gap:8px;}
   .loc-btn{
@@ -274,6 +280,33 @@
     background:var(--ink); color:#fff; opacity:.85;
   }
   .conn-badge.err{background:var(--danger);}
+
+  .lightbox{
+    position:fixed; inset:0; z-index:2000; display:none;
+    background:rgba(0,0,0,.9);
+    align-items:center; justify-content:center;
+  }
+  .lightbox.open{ display:flex; }
+  .lightbox img{
+    max-width:92vw; max-height:86vh; object-fit:contain; border-radius:4px;
+  }
+  .lightbox-close{
+    position:absolute; top:14px; right:16px; z-index:2001;
+    background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:50%;
+    width:38px; height:38px; font-size:18px; cursor:pointer;
+  }
+  .lightbox-nav{
+    position:absolute; top:50%; transform:translateY(-50%);
+    background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:50%;
+    width:44px; height:44px; font-size:26px; cursor:pointer; z-index:2001;
+  }
+  .lightbox-prev{ left:10px; }
+  .lightbox-next{ right:10px; }
+  .lightbox-count{
+    position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+    color:#fff; font-size:12px; background:rgba(255,255,255,.15); padding:3px 10px; border-radius:20px;
+  }
+  .lightbox-photo, .lightbox-local-photo{ cursor:pointer; }
 
   .tag-options{display:flex; flex-wrap:wrap; gap:8px;}
   .tag-opt{
@@ -345,6 +378,14 @@
 
 <div class="conn-badge" id="connBadge">接続中…</div>
 
+<div class="lightbox" id="lightbox">
+  <button type="button" class="lightbox-close" id="lightboxClose">✕</button>
+  <button type="button" class="lightbox-nav lightbox-prev" id="lightboxPrev">‹</button>
+  <img id="lightboxImg" src="" alt="">
+  <button type="button" class="lightbox-nav lightbox-next" id="lightboxNext">›</button>
+  <div class="lightbox-count" id="lightboxCount"></div>
+</div>
+
 <div class="page">
   <header>
     <h1>危険箇所マップ <span id="roleBadge" style="display:none; font-size:12px; font-weight:700; color:#fff; background:#5B6B7A; padding:3px 9px; border-radius:20px; vertical-align:middle;">管理者モード</span></h1>
@@ -384,13 +425,13 @@
     <input type="hidden" id="editingId" value="">
 
     <div class="field">
-      <label>写真</label>
+      <label>写真（複数枚可）</label>
       <div class="photo-input">
         <label class="photo-btn" id="photoLabel">
-          <span id="photoLabelText">タップして撮影・選択</span>
-          <input type="file" accept="image/*" capture="environment" id="photoInput" style="display:none">
+          <span id="photoLabelText">タップして撮影・追加</span>
+          <input type="file" accept="image/*" capture="environment" multiple id="photoInput" style="display:none">
         </label>
-        <img id="photoPreview" class="photo-preview">
+        <div id="photoThumbs" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;"></div>
       </div>
     </div>
 
@@ -556,8 +597,32 @@
   let selectedSeverity = null;
   let selectedLatLng = null;
   const selectedTags = new Set();
-  let compressedPhoto = null;
+  let selectedPhotos = []; // 圧縮済みの写真（複数枚, dataURL文字列の配列）
+  const MAX_PHOTOS = 5;
   let tapModeActive = false;
+
+  function getPhotos(r){
+    if(r.photos && r.photos.length) return r.photos;
+    if(r.photo) return [r.photo];
+    return [];
+  }
+
+  function renderPhotoThumbs(){
+    const box = byId("photoThumbs");
+    if(!box) return;
+    box.innerHTML = selectedPhotos.map((src, i)=>`
+      <div class="photo-thumb">
+        <img src="${src}" class="lightbox-local-photo" data-idx="${i}">
+        <button type="button" class="photo-thumb-remove" data-idx="${i}" title="削除">✕</button>
+      </div>
+    `).join("");
+    box.querySelectorAll(".photo-thumb-remove").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        selectedPhotos.splice(parseInt(btn.dataset.idx, 10), 1);
+        renderPhotoThumbs();
+      });
+    });
+  }
 
   function toast(msg, isError){
     const t = document.getElementById("toast");
@@ -801,7 +866,7 @@
       <div class="popup-body">
         <span class="tag" style="display:inline-block;font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;margin-bottom:5px;background:${r.resolved ? '#4C7A5E' : meta.color}">No.${number ?? ""} ${r.resolved ? "解消済み" : meta.label}</span>
         ${showDisasterBadge ? `<span class="tag" style="display:inline-block;font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;margin-bottom:5px;margin-left:4px;background:#5B6B7A;">${escapeHtml(r.disaster || "未設定")}</span>` : ""}
-        ${r.photo ? `<img src="${r.photo}" style="width:100%;border-radius:6px;margin-bottom:6px;display:block;">` : ""}
+        ${(()=>{ const ph = getPhotos(r); return ph.length ? `<div style="display:flex; gap:4px; overflow-x:auto; margin-bottom:6px;">${ph.map((p,i)=>`<img src="${p}" class="lightbox-photo" data-report-id="${r.id}" data-idx="${i}" style="width:70px; height:70px; border-radius:6px; object-fit:cover; flex-shrink:0;">`).join("")}</div>` : ""; })()}
         <div style="font-size:11px;color:#6b6a63;margin-bottom:2px;">📍 ${escapeHtml(displayLocation(r))}</div>
         <div>${escapeHtml(r.comment || "（メモなし）")}</div>
         <div style="color:#6b6a63;font-size:11px;margin-top:4px;">${escapeHtml(r.reporterName || "匿名")}・${dateStr}</div>
@@ -851,7 +916,9 @@
       const dateStr = new Date(r.createdAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
       return `
         <div class="report-card" data-id="${r.id}">
-          ${r.photo ? `<img src="${r.photo}">` : `<div style="width:64px;height:64px;border-radius:8px;background:#DFD9C8;flex-shrink:0;"></div>`}
+          ${(()=>{ const ph = getPhotos(r); return ph.length
+            ? `<div style="position:relative; flex-shrink:0;"><img src="${ph[0]}" class="lightbox-photo" data-report-id="${r.id}" data-idx="0">${ph.length>1 ? `<span style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,.65); color:#fff; font-size:10px; padding:1px 5px; border-radius:8px;">+${ph.length-1}</span>` : ""}</div>`
+            : `<div style="width:64px;height:64px;border-radius:8px;background:#DFD9C8;flex-shrink:0;"></div>`; })()}
           <div style="flex:1; min-width:0;">
             <span class="tag" style="background:${r.resolved ? 'var(--resolved)' : meta.color}">No.${numberMap[r.id]} ${r.resolved ? "解消済み" : meta.label}</span>
             ${showDisasterBadge ? `<span class="tag" style="background:#5B6B7A;">${escapeHtml(r.disaster || "未設定")}</span>` : ""}
@@ -964,10 +1031,12 @@
           <h1 style="font-size:18px; margin:0 0 4px 0;">熊本配達危険マップ 報告一覧</h1>
           <p style="font-size:12px; color:#666; margin:0 0 12px 0;">出力日時：${new Date().toLocaleString("ja-JP")}／表示範囲内：${sorted.length}件</p>
         </div>
-        ${sorted.map(r=>`
+        ${sorted.map(r=>{
+          const ph = getPhotos(r);
+          return `
           <div class="print-card" style="display:block;">
             <div style="display:flex; gap:12px; align-items:flex-start;">
-              ${r.photo ? `<img src="${r.photo}" style="width:85mm; height:85mm; object-fit:cover; border-radius:4px; border:1px solid #999; flex-shrink:0;">` : ""}
+              ${ph[0] ? `<img src="${ph[0]}" style="width:85mm; height:85mm; object-fit:cover; border-radius:4px; border:1px solid #999; flex-shrink:0;">` : ""}
               <div style="flex:1; min-width:0;">
                 <div style="font-weight:700; font-size:14px;">
                   No.${numberMap[r.id]} ${r.resolved ? "【解消済み】" : "【未解消】"} ${SEV_LABEL[r.severity]||""}
@@ -979,8 +1048,9 @@
                 </div>
               </div>
             </div>
-          </div>
-        `).join("")}
+            ${ph.length > 1 ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">${ph.slice(1).map(p=>`<img src="${p}" style="width:40mm; height:40mm; object-fit:cover; border-radius:4px; border:1px solid #999;">`).join("")}</div>` : ""}
+          </div>`;
+        }).join("")}
       `;
     }
 
@@ -1141,7 +1211,7 @@
     try{
       selectedSeverity = null;
       selectedLatLng = null;
-      compressedPhoto = null;
+      selectedPhotos = [];
       selectedTags.clear();
       if(byId("editingId")) byId("editingId").value = "";
       if(byId("formTitle")) byId("formTitle").textContent = "危険箇所を報告";
@@ -1154,9 +1224,9 @@
       document.querySelectorAll(".sev-opt").forEach(el=>el.classList.remove("active"));
       document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
       if(byId("commentInput")) byId("commentInput").value = "";
-      if(byId("photoPreview")) byId("photoPreview").style.display = "none";
+      renderPhotoThumbs();
       if(byId("photoInput")) byId("photoInput").value = "";
-      if(byId("photoLabelText")) byId("photoLabelText").textContent = "タップして撮影・選択";
+      if(byId("photoLabelText")) byId("photoLabelText").textContent = "タップして撮影・追加";
       if(byId("addressInput")){
         byId("addressInput").value = "";
         byId("addressInput").style.display = "none";
@@ -1262,7 +1332,8 @@
       tags: tagsText,
       note: extraNote,
       reporterName: name,
-      photo: compressedPhoto
+      photos: selectedPhotos,
+      photo: selectedPhotos[0] || null
     };
 
     try{
@@ -1322,14 +1393,11 @@
         addrInput.style.display = "block";
       }
 
-      if(r.photo){
-        compressedPhoto = r.photo;
-        const preview = byId("photoPreview");
-        if(preview){
-          preview.src = r.photo;
-          preview.style.display = "block";
-        }
-        if(byId("photoLabelText")) byId("photoLabelText").textContent = "写真を変更";
+      const existingPhotos = getPhotos(r);
+      if(existingPhotos.length){
+        selectedPhotos = [...existingPhotos];
+        renderPhotoThumbs();
+        if(byId("photoLabelText")) byId("photoLabelText").textContent = "写真を追加";
       }
 
       if(byId("nameInput")) byId("nameInput").value = r.reporterName || byId("nameInput").value;
@@ -1349,7 +1417,57 @@
     document.getElementById("formPanel").classList.remove("open");
   }
 
+  let lightboxPhotos = [];
+  let lightboxIndex = 0;
+
+  function openLightbox(photos, index){
+    if(!photos || photos.length === 0) return;
+    lightboxPhotos = photos;
+    lightboxIndex = index;
+    renderLightbox();
+    document.getElementById("lightbox").classList.add("open");
+  }
+
+  function renderLightbox(){
+    document.getElementById("lightboxImg").src = lightboxPhotos[lightboxIndex];
+    document.getElementById("lightboxCount").textContent =
+      lightboxPhotos.length > 1 ? `${lightboxIndex+1} / ${lightboxPhotos.length}` : "";
+    const multi = lightboxPhotos.length > 1;
+    document.getElementById("lightboxPrev").style.display = multi ? "block" : "none";
+    document.getElementById("lightboxNext").style.display = multi ? "block" : "none";
+  }
+
+  function closeLightbox(){
+    document.getElementById("lightbox").classList.remove("open");
+  }
+
   function initEvents(){
+    // Photo lightbox: delegated click handling since photo <img> elements are
+    // (re)generated dynamically inside popups/lists/thumbnails.
+    document.body.addEventListener("click", (e)=>{
+      const target = e.target.closest(".lightbox-photo, .lightbox-local-photo");
+      if(!target) return;
+      const idx = parseInt(target.dataset.idx, 10) || 0;
+      if(target.classList.contains("lightbox-local-photo")){
+        openLightbox(selectedPhotos, idx);
+      }else{
+        const r = reports.find(x=>x.id === target.dataset.reportId);
+        if(r) openLightbox(getPhotos(r), idx);
+      }
+    });
+    document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
+    document.getElementById("lightbox").addEventListener("click", (e)=>{
+      if(e.target.id === "lightbox") closeLightbox();
+    });
+    document.getElementById("lightboxPrev").addEventListener("click", ()=>{
+      lightboxIndex = (lightboxIndex - 1 + lightboxPhotos.length) % lightboxPhotos.length;
+      renderLightbox();
+    });
+    document.getElementById("lightboxNext").addEventListener("click", ()=>{
+      lightboxIndex = (lightboxIndex + 1) % lightboxPhotos.length;
+      renderLightbox();
+    });
+
     document.getElementById("addBtn").addEventListener("click", ()=>{
       if(userRole === "admin" && !adminDisasterFilter){
         toast("先に「表示する災害」で特定の災害を選んでから報告してください");
@@ -1429,19 +1547,32 @@
     });
 
     document.getElementById("photoInput").addEventListener("change", async (e)=>{
-      const file = e.target.files[0];
-      if(!file) return;
-      document.getElementById("photoLabel").textContent = "処理中…";
+      const files = Array.from(e.target.files || []);
+      if(files.length === 0) return;
+      const labelText = document.getElementById("photoLabelText");
+      const remaining = MAX_PHOTOS - selectedPhotos.length;
+      if(remaining <= 0){
+        toast(`写真は最大${MAX_PHOTOS}枚までです`);
+        e.target.value = "";
+        return;
+      }
+      const toProcess = files.slice(0, remaining);
+      if(files.length > toProcess.length){
+        toast(`写真は最大${MAX_PHOTOS}枚までのため、一部のみ追加しました`);
+      }
+      if(labelText) labelText.textContent = "処理中…";
       try{
-        compressedPhoto = await compressPhoto(file);
-        const preview = document.getElementById("photoPreview");
-        preview.src = compressedPhoto;
-        preview.style.display = "block";
-        document.getElementById("photoLabel").textContent = "写真を変更";
+        for(const file of toProcess){
+          const compressed = await compressPhoto(file);
+          selectedPhotos.push(compressed);
+        }
+        renderPhotoThumbs();
+        if(labelText) labelText.textContent = selectedPhotos.length ? "写真を追加" : "タップして撮影・追加";
       }catch(err){
-        document.getElementById("photoLabel").textContent = "タップして撮影・選択";
+        if(labelText) labelText.textContent = "タップして撮影・追加";
         toast("写真の処理に失敗しました");
       }
+      e.target.value = "";
     });
 
     document.getElementById("gpsBtn").addEventListener("click", ()=>{
