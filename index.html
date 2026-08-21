@@ -285,10 +285,14 @@
     position:fixed; inset:0; z-index:2000; display:none;
     background:rgba(0,0,0,.9);
     align-items:center; justify-content:center;
+    touch-action:none;
+    overflow:hidden;
   }
   .lightbox.open{ display:flex; }
   .lightbox img{
     max-width:92vw; max-height:86vh; object-fit:contain; border-radius:4px;
+    touch-action:none;
+    will-change:transform;
   }
   .lightbox-close{
     position:absolute; top:14px; right:16px; z-index:2001;
@@ -320,6 +324,15 @@
     flex:1; min-width:140px; border:1px solid var(--line); background:#fff; color:var(--ink);
     border-radius:10px; padding:10px; font-size:13px; font-weight:700; cursor:pointer;
   }
+
+  .pin-nav-row{display:flex; gap:6px; margin:14px 16px 0 16px;}
+  .pin-nav-btn{
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:10px; font-size:12px; font-weight:700; cursor:pointer;
+    padding:10px 4px; min-width:0;
+  }
+  .pin-nav-btn.pin-nav-side{ flex:0 0 26%; }
+  .pin-nav-btn.pin-nav-latest{ flex:1 1 auto; }
 
   /* Monochrome basemap: only the tile layer is desaturated, markers/circles are untouched */
   .leaflet-tile-pane{ filter: grayscale(1) contrast(1.05); }
@@ -486,10 +499,10 @@
     <button type="button" id="deleteReportBtn" style="display:none; width:100%; margin-top:10px; border:1px solid var(--danger); background:#fff; color:var(--danger); border-radius:10px; padding:12px; font-size:14px; font-weight:700; cursor:pointer;">この報告を削除する</button>
   </section>
 
-  <div class="pin-nav-row" id="pinNavRow" style="display:flex; gap:8px; margin:14px 16px 0 16px;">
-    <button type="button" class="export-btn" id="pinPrevBtn" style="flex:0 0 auto; padding:10px 14px;">◀ 前へ</button>
-    <button type="button" class="export-btn" id="pinLatestBtn" style="flex:1;">最新の報告へ</button>
-    <button type="button" class="export-btn" id="pinNextBtn" style="flex:0 0 auto; padding:10px 14px;">次へ ▶</button>
+  <div class="pin-nav-row" id="pinNavRow">
+    <button type="button" class="pin-nav-btn pin-nav-side" id="pinPrevBtn">◀ 前へ</button>
+    <button type="button" class="pin-nav-btn pin-nav-latest" id="pinLatestBtn">最新の報告へ</button>
+    <button type="button" class="pin-nav-btn pin-nav-side" id="pinNextBtn">次へ ▶</button>
   </div>
   <div class="map-card">
     <div id="map"></div>
@@ -1525,6 +1538,7 @@
   function renderLightbox(){
     const photos = currentLightboxPhotos();
     document.getElementById("lightboxImg").src = photos[lightboxIndex];
+    resetLightboxZoom();
 
     const countEl = document.getElementById("lightboxCount");
     if(lightboxMode === "report"){
@@ -1544,6 +1558,90 @@
 
   function closeLightbox(){
     document.getElementById("lightbox").classList.remove("open");
+    resetLightboxZoom();
+  }
+
+  // --- Lightbox touch handling: pinch-to-zoom, drag-to-pan while zoomed,
+  // and swipe left/right to move to the next/previous photo when not zoomed.
+  let lbScale = 1, lbTx = 0, lbTy = 0;
+  let lbPinchStartDist = 0, lbPinchStartScale = 1;
+  let lbPanStartX = 0, lbPanStartY = 0, lbPanStartTx = 0, lbPanStartTy = 0;
+  let lbSwipeStartX = 0, lbSwipeStartY = 0;
+  let lbGesture = null; // "pinch" | "pan" | "swipe"
+
+  function resetLightboxZoom(){
+    lbScale = 1; lbTx = 0; lbTy = 0;
+    applyLightboxTransform();
+  }
+
+  function applyLightboxTransform(){
+    const img = document.getElementById("lightboxImg");
+    if(img) img.style.transform = `translate(${lbTx}px, ${lbTy}px) scale(${lbScale})`;
+  }
+
+  function touchDist(touches){
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function initLightboxTouchHandlers(){
+    const lb = document.getElementById("lightbox");
+    let lastX = 0, lastY = 0; // most recent single-touch point (used for swipe distance on end)
+
+    lb.addEventListener("touchstart", (e)=>{
+      if(e.touches.length === 2){
+        lbGesture = "pinch";
+        lbPinchStartDist = touchDist(e.touches);
+        lbPinchStartScale = lbScale;
+      }else if(e.touches.length === 1){
+        lastX = e.touches[0].clientX;
+        lastY = e.touches[0].clientY;
+        if(lbScale > 1.02){
+          lbGesture = "pan";
+          lbPanStartX = e.touches[0].clientX;
+          lbPanStartY = e.touches[0].clientY;
+          lbPanStartTx = lbTx;
+          lbPanStartTy = lbTy;
+        }else{
+          lbGesture = "swipe";
+          lbSwipeStartX = e.touches[0].clientX;
+          lbSwipeStartY = e.touches[0].clientY;
+        }
+      }
+    }, {passive:true});
+
+    lb.addEventListener("touchmove", (e)=>{
+      if(lbGesture === "pinch" && e.touches.length === 2){
+        e.preventDefault();
+        const dist = touchDist(e.touches);
+        lbScale = Math.min(4, Math.max(1, lbPinchStartScale * (dist / lbPinchStartDist)));
+        applyLightboxTransform();
+      }else if(lbGesture === "pan" && e.touches.length === 1){
+        e.preventDefault();
+        lastX = e.touches[0].clientX;
+        lastY = e.touches[0].clientY;
+        lbTx = lbPanStartTx + (lastX - lbPanStartX);
+        lbTy = lbPanStartTy + (lastY - lbPanStartY);
+        applyLightboxTransform();
+      }else if(lbGesture === "swipe" && e.touches.length === 1){
+        lastX = e.touches[0].clientX;
+        lastY = e.touches[0].clientY;
+      }
+    }, {passive:false});
+
+    lb.addEventListener("touchend", ()=>{
+      if(lbGesture === "pinch"){
+        if(lbScale < 1.05){ lbScale = 1; lbTx = 0; lbTy = 0; applyLightboxTransform(); }
+      }else if(lbGesture === "swipe"){
+        const dx = lastX - lbSwipeStartX;
+        const dy = lastY - lbSwipeStartY;
+        if(Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)){
+          lightboxStep(dx < 0 ? 1 : -1);
+        }
+      }
+      lbGesture = null;
+    }, {passive:true});
   }
 
   function initEvents(){
@@ -1565,6 +1663,7 @@
     });
     document.getElementById("lightboxPrev").addEventListener("click", ()=> lightboxStep(-1));
     document.getElementById("lightboxNext").addEventListener("click", ()=> lightboxStep(1));
+    initLightboxTouchHandlers();
 
     document.getElementById("addBtn").addEventListener("click", ()=>{
       if(userRole === "admin" && !adminDisasterFilter){
