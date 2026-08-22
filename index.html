@@ -408,14 +408,20 @@
   <header>
     <h1>危険箇所マップ <span id="roleBadge" style="display:none; font-size:12px; font-weight:700; color:#fff; background:#5B6B7A; padding:3px 9px; border-radius:20px; vertical-align:middle;">管理者モード</span></h1>
     <p id="headerSubtitle">熊本地震・配達ルート情報共有</p>
+    <div id="adminOfficeInfoBox" style="display:none; margin:10px 0 4px 0; font-size:11px; line-height:1.6; color:var(--ink-soft); background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px;">
+      <b style="color:var(--ink);">拠点（郵便局）の追加について：</b><br>
+      事前登録は不要です。各拠点には合言葉として下記のルールで文字列を決めて伝えてください。その拠点の配達員が最初に合言葉を入力すると、自動的にその拠点のデータとして記録されます。<br>
+      <span style="display:inline-block; margin-top:6px; padding:6px 8px; background:var(--paper); border-radius:6px;" id="officeNamingRuleText"></span><br>
+      <span style="display:inline-block; margin-top:6px;">※まだ報告が1件も無い拠点は、下のプルダウンにはまだ表示されません（報告が届き次第、自動的に一覧に追加されます）。</span>
+    </div>
     <div class="print-zoom-row" id="adminDisasterRow" style="display:none; align-items:center; gap:8px; margin:10px 0 4px 0; font-size:12px; color:var(--ink-soft);">
-      <span>表示する災害：</span>
+      <span>表示する郵便局：</span>
       <select id="adminDisasterSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
-        <option value="">すべての災害</option>
+        <option value="">すべての郵便局</option>
       </select>
     </div>
     <div id="scopeWarning" style="display:none; margin:0 0 10px 0; font-size:12px; color:var(--danger); font-weight:700;">
-      「すべての災害」を表示中は新しい報告を登録できません。上で特定の災害を選んでください。
+      「すべての郵便局」を表示中は新しい報告を登録できません。上で特定の郵便局を選んでください。
     </div>
     <div class="stats">
       <div class="stat-pill"><b id="stat-total">0</b> 件</div>
@@ -593,12 +599,15 @@
     messagingSenderId: "828112884275",
     appId: "1:828112884275:web:11dea040e7cafae231c946"
   };
-  // 2) 災害ごとの合言葉。新しい災害を追加する場合はこの配列に増やしてください。
-  const DISASTERS = [
-    { passcode: "kumamoto2026", name: "令和8年熊本地震" }
-  ];
-  // 3) 管理者用の閲覧パスコード（全災害を横断して閲覧・編集できる簡易ゲート）
+  // 2) 郵便局（拠点）の合言葉は事前登録が不要です。
+  //    各拠点の合言葉＝その拠点の名前として、そのまま入力してもらう方式にしています。
+  //    （例：合言葉として「西本町郵便局」と入力 → それがそのままその拠点のデータの区切りになる）
+  //    表記ゆれ防止のため、管理者は各拠点に「必ずこの形式で入力してください」という
+  //    命名ルールを伝えてください（画面下部の管理者用エリアにルールを表示できます）。
+  // 3) 管理者用の閲覧パスコード（全拠点を横断して閲覧・編集できる簡易ゲート）
   const ADMIN_GATE_PASSCODE = "kanri2026";
+  // 4) 管理者画面に表示する、拠点の合言葉の命名ルール（配達員向けの案内文）
+  const OFFICE_NAMING_RULE = "合言葉は「〇〇郵便局」の形式で、正式名称をそのまま入力してください（スペースや略称は使わないでください）";
   // 4) 管理者ログイン（全データ削除用）はFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
   // ▲▲▲ ここまで ▲▲▲
 
@@ -819,6 +828,7 @@
   }
 
   function renderAll(){
+    refreshAdminOfficeOptions();
     renderStats();
     renderMarkers();
     renderList();
@@ -1134,7 +1144,7 @@
     const showDisasterCol = (userRole === "admin" && !adminDisasterFilter);
     const numberMap = buildNumberMap();
     const header = showDisasterCol
-      ? ["番号","災害名","状態","危険度","タグ","補足メモ","住所","報告者","日時"]
+      ? ["番号","郵便局名","状態","危険度","タグ","補足メモ","住所","報告者","日時"]
       : ["番号","状態","危険度","タグ","補足メモ","住所","報告者","日時"];
     const rows = [...scoped]
       .sort((a,b)=> numberMap[a.id]-numberMap[b.id])
@@ -1873,21 +1883,22 @@
       return false;
     }
 
-    const matched = DISASTERS.find(d => d.passcode === val);
-    if(matched){
-      userRole = "disaster";
-      currentDisaster = matched.name;
-      try{
-        localStorage.setItem(GATE_KEY, "1");
-        localStorage.setItem(ROLE_KEY, "disaster");
-        localStorage.setItem(DISASTER_KEY, matched.name);
-      }catch(e){}
-      document.getElementById("gate").classList.add("hidden");
-      start();
+    if(!val){
+      document.getElementById("gateErr").textContent = "合言葉を入力してください";
       return false;
     }
 
-    document.getElementById("gateErr").textContent = "合言葉が違います";
+    // 事前登録なし：入力された文字列そのものを、その拠点（郵便局）の
+    // 識別名として扱う。同じ文字列を入力した人同士でデータが共有される。
+    userRole = "disaster";
+    currentDisaster = val;
+    try{
+      localStorage.setItem(GATE_KEY, "1");
+      localStorage.setItem(ROLE_KEY, "disaster");
+      localStorage.setItem(DISASTER_KEY, val);
+    }catch(e){}
+    document.getElementById("gate").classList.add("hidden");
+    start();
     return false;
   }
 
@@ -1914,19 +1925,33 @@
     }
     const adminRow = document.getElementById("adminDisasterRow");
     if(adminRow) adminRow.style.display = (userRole === "admin") ? "flex" : "none";
+    const infoBox = document.getElementById("adminOfficeInfoBox");
+    if(infoBox) infoBox.style.display = (userRole === "admin") ? "block" : "none";
+    const ruleText = document.getElementById("officeNamingRuleText");
+    if(ruleText) ruleText.textContent = OFFICE_NAMING_RULE;
 
-    if(userRole === "admin"){
-      const select = document.getElementById("adminDisasterSelect");
-      if(select && select.options.length <= 1){
-        DISASTERS.forEach(d=>{
-          const opt = document.createElement("option");
-          opt.value = d.name;
-          opt.textContent = d.name;
-          select.appendChild(opt);
-        });
-      }
-    }
     updateScopeWarning();
+  }
+
+  // 事前登録された局一覧は持たない。実際に届いている報告データの中から
+  // 使われている拠点名（合言葉）をユニークに拾い出し、管理者のプルダウンに
+  // 反映する。まだ一件も報告がない拠点は、報告が来るまでは一覧に出てこない。
+  function refreshAdminOfficeOptions(){
+    if(userRole !== "admin") return;
+    const select = document.getElementById("adminDisasterSelect");
+    if(!select) return;
+    const prevValue = select.value;
+    const names = Array.from(new Set((reports||[]).map(r=>r.disaster).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja"));
+    select.innerHTML = `<option value="">すべての郵便局</option>` + names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+    // フィルタ中だった拠点がまだ一覧にあれば選択状態を維持する
+    if(prevValue && names.includes(prevValue)){
+      select.value = prevValue;
+    }else if(prevValue && !names.includes(prevValue)){
+      // 選んでいた拠点のデータが無くなった場合は「すべて」に戻す
+      adminDisasterFilter = null;
+      select.value = "";
+      updateScopeWarning();
+    }
   }
 
   function updateScopeWarning(){
