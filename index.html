@@ -1246,17 +1246,18 @@
       toast("Firebase未接続です", true);
       return;
     }
-    const targets = (reports || []).filter(r => r.disaster === MIGRATE_FROM_NAME);
+    const targets = (reports || []).filter(r => r.disaster !== MIGRATE_TO_NAME && (r.disaster === MIGRATE_FROM_NAME || !r.disaster));
     if(targets.length === 0){
-      toast(`「${MIGRATE_FROM_NAME}」のデータは見つかりませんでした（既に移行済みかもしれません）`);
+      toast(`対象データは見つかりませんでした（既に移行済みかもしれません）`);
       return;
     }
     const sure = window.confirm(
-      `「${MIGRATE_FROM_NAME}」の${targets.length}件を「${MIGRATE_TO_NAME}」に書き換えます。\n` +
+      `「${MIGRATE_FROM_NAME}」、または郵便局名が未設定の報告　合計${targets.length}件を「${MIGRATE_TO_NAME}」に書き換えます。\n` +
       `※ 実行前にFirebaseコンソールでJSONバックアップを取ることを強く推奨します。\n\n` +
       `バックアップ済みで、実行してよろしいですか？`
     );
     if(!sure) return;
+
 
     const btn = document.getElementById("migrateOfficeNameBtn");
     btn.disabled = true;
