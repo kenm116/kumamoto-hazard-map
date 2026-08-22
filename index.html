@@ -420,6 +420,10 @@
         <option value="">すべての郵便局</option>
       </select>
     </div>
+    <div class="export-row" id="officeManageRow" style="display:none; margin:0 0 10px 0;">
+      <button type="button" id="renameOfficeBtn" disabled style="flex:1; min-width:140px; border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:10px; padding:9px; font-size:12px; font-weight:700; cursor:pointer;">✏️ この郵便局名を変更</button>
+      <button type="button" id="deleteOfficeBtn" disabled style="flex:1; min-width:140px; border:1px solid var(--danger); background:#fff; color:var(--danger); border-radius:10px; padding:9px; font-size:12px; font-weight:700; cursor:pointer;">🗑️ この郵便局のデータを削除</button>
+    </div>
     <div id="scopeWarning" style="display:none; margin:0 0 10px 0; font-size:12px; color:var(--danger); font-weight:700;">
       「すべての郵便局」を表示中は新しい報告を登録できません。上で特定の郵便局を選んでください。
     </div>
@@ -1734,8 +1738,12 @@
     document.getElementById("adminDisasterSelect").addEventListener("change", (e)=>{
       adminDisasterFilter = e.target.value || null;
       updateScopeWarning();
+      updateOfficeManageButtons();
       renderAll();
     });
+
+    document.getElementById("renameOfficeBtn").addEventListener("click", renameSelectedOffice);
+    document.getElementById("deleteOfficeBtn").addEventListener("click", deleteSelectedOffice);
 
     document.querySelectorAll(".sev-opt").forEach(el=>{
       el.addEventListener("click", ()=>{
@@ -1947,8 +1955,8 @@
     if(ruleText) ruleText.textContent = OFFICE_NAMING_RULE;
 
     updateScopeWarning();
+    updateOfficeManageButtons();
   }
-
   // 事前登録された局一覧は持たない。実際に届いている報告データの中から
   // 使われている拠点名（合言葉）をユニークに拾い出し、管理者のプルダウンに
   // 反映する。まだ一件も報告がない拠点は、報告が来るまでは一覧に出てこない。
@@ -1967,6 +1975,96 @@
       adminDisasterFilter = null;
       select.value = "";
       updateScopeWarning();
+    }
+    updateOfficeManageButtons();
+  }
+
+  function updateOfficeManageButtons(){
+    const row = document.getElementById("officeManageRow");
+    const renameBtn = document.getElementById("renameOfficeBtn");
+    const deleteBtn = document.getElementById("deleteOfficeBtn");
+    if(!row || !renameBtn || !deleteBtn) return;
+    row.style.display = (userRole === "admin") ? "flex" : "none";
+    const enabled = (userRole === "admin" && !!adminDisasterFilter);
+    renameBtn.disabled = !enabled;
+    deleteBtn.disabled = !enabled;
+  }
+
+  // 選択中の郵便局（合言葉）の名前を、配下の全報告ごとまとめて変更する。
+  async function renameSelectedOffice(){
+    if(!adminDisasterFilter){ toast("先に特定の郵便局を選んでください"); return; }
+    if(!db){ toast("Firebase未接続です", true); return; }
+    const oldName = adminDisasterFilter;
+    const input = window.prompt(`「${oldName}」の新しい合言葉（郵便局名）を入力してください`, oldName);
+    if(input === null) return;
+    const newName = input.trim();
+    if(!newName){ toast("空の名前には変更できません", true); return; }
+    if(newName === oldName){ return; }
+
+    const targets = (reports || []).filter(r => r.disaster === oldName);
+    const sure = window.confirm(
+      `「${oldName}」の${targets.length}件の合言葉を「${newName}」に変更します。\n` +
+      `この操作の後は、この郵便局の配達員には新しい合言葉「${newName}」を伝え直してください。\n\n` +
+      `よろしいですか？`
+    );
+    if(!sure) return;
+
+    const renameBtn = document.getElementById("renameOfficeBtn");
+    renameBtn.disabled = true;
+    renameBtn.textContent = "変更中…";
+    let success = 0, fail = 0;
+    for(const r of targets){
+      try{
+        await updateReport(r.id, {disaster: newName});
+        success++;
+      }catch(e){
+        fail++;
+      }
+    }
+    renameBtn.textContent = "✏️ この郵便局名を変更";
+    adminDisasterFilter = newName;
+    if(fail === 0){
+      toast(`「${oldName}」を「${newName}」に変更しました（${success}件）`);
+    }else{
+      toast(`一部失敗しました（成功${success}件／失敗${fail}件）`, true);
+    }
+  }
+
+  // 選択中の郵便局（合言葉）のデータを丸ごと削除する。誤って登録された
+  // 拠点や、テスト用の拠点を消したい場合に使用する。
+  async function deleteSelectedOffice(){
+    if(!adminDisasterFilter){ toast("先に特定の郵便局を選んでください"); return; }
+    if(!db){ toast("Firebase未接続です", true); return; }
+    const name = adminDisasterFilter;
+    const targets = (reports || []).filter(r => r.disaster === name);
+
+    const sure1 = window.confirm(
+      `「${name}」のデータ（${targets.length}件）をすべて削除します。この操作は取り消せません。\n\n本当によろしいですか？`
+    );
+    if(!sure1) return;
+    const sure2 = window.confirm(
+      `最終確認です。「${name}」の${targets.length}件を完全に削除します。よろしいですか？`
+    );
+    if(!sure2) return;
+
+    const deleteBtn = document.getElementById("deleteOfficeBtn");
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = "削除中…";
+    let success = 0, fail = 0;
+    for(const r of targets){
+      try{
+        await deleteReport(r.id);
+        success++;
+      }catch(e){
+        fail++;
+      }
+    }
+    deleteBtn.textContent = "🗑️ この郵便局のデータを削除";
+    adminDisasterFilter = null;
+    if(fail === 0){
+      toast(`「${name}」のデータを削除しました（${success}件）`);
+    }else{
+      toast(`一部失敗しました（成功${success}件／失敗${fail}件）`, true);
     }
   }
 
