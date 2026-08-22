@@ -454,12 +454,21 @@
 
     <div class="field">
       <label>写真（複数枚可）</label>
-      <div class="photo-input">
-        <label class="photo-btn" id="photoLabel">
-          <span id="photoLabelText">タップして撮影・追加</span>
-          <input type="file" accept="image/*" capture="environment" multiple id="photoInput" style="display:none">
-        </label>
-        <div id="photoThumbs" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;"></div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; gap:8px;">
+          <label class="photo-btn" id="cameraPhotoLabel" style="flex:1.4; padding:16px 10px; font-weight:700; color:var(--post-red); background:#FDEDEA; border-style:solid; border-color:var(--post-red);">
+            <span id="cameraPhotoLabelText">📷 タップして撮影</span>
+            <input type="file" accept="image/*" capture="environment" multiple id="cameraPhotoInput" style="display:none">
+          </label>
+          <label class="photo-btn" id="libraryPhotoLabel" style="flex:1;">
+            <span id="libraryPhotoLabelText">🖼️ 写真を選択</span>
+            <input type="file" accept="image/*" multiple id="libraryPhotoInput" style="display:none">
+          </label>
+        </div>
+        <div id="photoThumbs" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+      </div>
+      <div style="font-size:11px; color:var(--ink-soft); margin-top:6px; line-height:1.5;">
+        ※ 報告に使う写真は自動で軽量化されます。<b>カメラで撮影した写真</b>は、選んだ直後に元データを端末に保存する案内が出ます（保存するかはご自身で選択してください）。<b style="color:var(--danger);">報告した後は、アプリ側から元の画質の写真を取り出すことはできません。</b>
       </div>
     </div>
 
@@ -575,7 +584,7 @@
   </section>
 
   <div class="hint-box">
-    報告はこのアプリを開いている配達員全員に共有されます。写真は自動で軽量化されますが、報告件数が非常に多くなると保存容量の上限に達する場合があります。
+    報告はこのアプリを開いている配達員全員に共有されます。写真は自動で軽量化されますが、報告件数が非常に多くなると保存容量の上限に達する場合があります。元の画質の写真は端末側に保存されない限り残らず、報告後にアプリから取り出すことはできません。
   </div>
 
   <div style="text-align:center; margin:20px 0 10px 0;">
@@ -1279,8 +1288,8 @@
       document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
       if(byId("commentInput")) byId("commentInput").value = "";
       renderPhotoThumbs();
-      if(byId("photoInput")) byId("photoInput").value = "";
-      if(byId("photoLabelText")) byId("photoLabelText").textContent = "タップして撮影・追加";
+      if(byId("cameraPhotoInput")) byId("cameraPhotoInput").value = "";
+      if(byId("libraryPhotoInput")) byId("libraryPhotoInput").value = "";
       if(byId("addressInput")){
         byId("addressInput").value = "";
         byId("addressInput").style.display = "none";
@@ -1451,7 +1460,6 @@
       if(existingPhotos.length){
         selectedPhotos = [...existingPhotos];
         renderPhotoThumbs();
-        if(byId("photoLabelText")) byId("photoLabelText").textContent = "写真を追加";
       }
 
       if(byId("nameInput")) byId("nameInput").value = r.reporterName || byId("nameInput").value;
@@ -1800,33 +1808,73 @@
       location.reload();
     });
 
-    document.getElementById("photoInput").addEventListener("change", async (e)=>{
-      const files = Array.from(e.target.files || []);
+    // Web Share API（ファイル共有）が使える端末では、OS標準の共有シートを開いて
+    // 「写真に保存」等を選べるようにする。使えない環境ではダウンロードリンクで代用する。
+    // どちらの方法も、実際に保存するかどうかは配達員自身の操作に委ねられる
+    // （ブラウザの制約上、確認なしに自動保存することはできないため）。
+    async function offerSaveOriginalPhoto(file){
+      try{
+        if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+          await navigator.share({files:[file], title:"危険箇所の写真（元データ）"});
+          return;
+        }
+      }catch(err){
+        // キャンセルも含めて失敗してよい。報告作成自体は継続する。
+      }
+      try{
+        const url = URL.createObjectURL(file);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name || `report-photo-${Date.now()}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      }catch(err){
+        // 保存案内に失敗しても、報告作成の妨げにはしない
+      }
+    }
+
+    // 共通の写真処理：圧縮してselectedPhotosに追加する。
+    // offerSave=trueの場合のみ、圧縮前に端末への保存案内（共有シート／ダウンロード）を挟む
+    // （カメラでその場で撮った写真だけを想定。写真ライブラリから選んだ既存の写真は、
+    // 既に端末にあるはずなので保存案内は出さない）。
+    async function processSelectedPhotoFiles(fileInputId, files, offerSave){
       if(files.length === 0) return;
-      const labelText = document.getElementById("photoLabelText");
       const remaining = MAX_PHOTOS - selectedPhotos.length;
       if(remaining <= 0){
         toast(`写真は最大${MAX_PHOTOS}枚までです`);
-        e.target.value = "";
+        document.getElementById(fileInputId).value = "";
         return;
       }
       const toProcess = files.slice(0, remaining);
       if(files.length > toProcess.length){
         toast(`写真は最大${MAX_PHOTOS}枚までのため、一部のみ追加しました`);
       }
-      if(labelText) labelText.textContent = "処理中…";
       try{
+        if(offerSave){
+          toast("元の写真を端末に保存する画面を表示します（保存するかはご自身で選択してください）");
+        }
         for(const file of toProcess){
+          if(offerSave) await offerSaveOriginalPhoto(file);
           const compressed = await compressPhoto(file);
           selectedPhotos.push(compressed);
         }
         renderPhotoThumbs();
-        if(labelText) labelText.textContent = selectedPhotos.length ? "写真を追加" : "タップして撮影・追加";
       }catch(err){
-        if(labelText) labelText.textContent = "タップして撮影・追加";
         toast("写真の処理に失敗しました");
       }
-      e.target.value = "";
+      document.getElementById(fileInputId).value = "";
+    }
+
+    document.getElementById("cameraPhotoInput").addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      await processSelectedPhotoFiles("cameraPhotoInput", files, true);
+    });
+
+    document.getElementById("libraryPhotoInput").addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      await processSelectedPhotoFiles("libraryPhotoInput", files, false);
     });
 
     document.getElementById("gpsBtn").addEventListener("click", ()=>{
