@@ -584,6 +584,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-database-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-app-check-compat.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -608,7 +609,12 @@
   const ADMIN_GATE_PASSCODE = "kanri2026";
   // 4) 管理者画面に表示する、拠点の合言葉の命名ルール（配達員向けの案内文）
   const OFFICE_NAMING_RULE = "合言葉は「〇〇郵便局」の形式で、正式名称をそのまま入力してください（スペースや略称は使わないでください）";
-  // 4) 管理者ログイン（全データ削除用）はFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
+  // 5) 管理者ログイン（全データ削除用）はFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
+  // 6) App Check（reCAPTCHA v3）のサイトキー。Firebaseコンソールの
+  //    「App Check」で発行したサイトキーをここに貼り付けてください。
+  //    ★ まだ「強制（Enforce）」をFirebaseコンソール側でONにしないでください。
+  //      このコードを配布し、正常に動くことを確認してから最後にONにします。
+  const APP_CHECK_SITE_KEY = "6LcfbpMtAAAAAIKi9ykCbriebN9aRQZlXeUHjS2L";
   // ▲▲▲ ここまで ▲▲▲
 
   const GATE_KEY = "hazard-map-authed";
@@ -768,6 +774,16 @@
     }
     try{
       firebase.initializeApp(firebaseConfig);
+      // App Check：正規のこのWebアプリから送られたリクエストであることを検証する。
+      // サイトキーが未設定のままだと動作に支障が出るため、その場合はスキップする
+      // （コンソール側で「強制」をONにするまでは、未設定でも通常通り動作します）。
+      if(typeof firebase.appCheck === "function" && APP_CHECK_SITE_KEY && !APP_CHECK_SITE_KEY.startsWith("ここに")){
+        try{
+          firebase.appCheck().activate(APP_CHECK_SITE_KEY, true);
+        }catch(e){
+          console.warn("App Checkの初期化に失敗しました:", e);
+        }
+      }
       auth = firebase.auth();
       db = firebase.database();
     }catch(e){
