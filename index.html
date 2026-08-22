@@ -423,6 +423,9 @@
     <div id="scopeWarning" style="display:none; margin:0 0 10px 0; font-size:12px; color:var(--danger); font-weight:700;">
       「すべての郵便局」を表示中は新しい報告を登録できません。上で特定の郵便局を選んでください。
     </div>
+    <button type="button" id="migrateOfficeNameBtn" style="display:none; width:100%; margin:0 0 10px 0; border:1px dashed var(--danger); background:#fff; color:var(--danger); border-radius:10px; padding:10px; font-size:12px; font-weight:700; cursor:pointer;">
+      🔧（一時的な移行用）「令和8年熊本地震」のデータを「kumamoto2026」に統合する
+    </button>
     <div class="stats">
       <div class="stat-pill"><b id="stat-total">0</b> 件</div>
       <div class="stat-pill danger"><b id="stat-open">0</b> 未解消</div>
@@ -1232,6 +1235,51 @@
     }
   }
 
+  // ▼ 一時的な移行用関数 ▼
+  // 過去の仕組みで保存された特定の拠点名（例：「令和8年熊本地震」）を、
+  // 新しい合言葉（例：「kumamoto2026」）に一括で書き換える。
+  // 使い終わったら、このボタン（HTML）とこの関数は削除してよい。
+  const MIGRATE_FROM_NAME = "令和8年熊本地震";
+  const MIGRATE_TO_NAME = "kumamoto2026";
+  async function migrateOfficeName(){
+    if(!db){
+      toast("Firebase未接続です", true);
+      return;
+    }
+    const targets = (reports || []).filter(r => r.disaster === MIGRATE_FROM_NAME);
+    if(targets.length === 0){
+      toast(`「${MIGRATE_FROM_NAME}」のデータは見つかりませんでした（既に移行済みかもしれません）`);
+      return;
+    }
+    const sure = window.confirm(
+      `「${MIGRATE_FROM_NAME}」の${targets.length}件を「${MIGRATE_TO_NAME}」に書き換えます。\n` +
+      `※ 実行前にFirebaseコンソールでJSONバックアップを取ることを強く推奨します。\n\n` +
+      `バックアップ済みで、実行してよろしいですか？`
+    );
+    if(!sure) return;
+
+    const btn = document.getElementById("migrateOfficeNameBtn");
+    btn.disabled = true;
+    btn.textContent = "移行中…（画面を閉じないでください）";
+    let success = 0, fail = 0;
+    for(const r of targets){
+      try{
+        await updateReport(r.id, {disaster: MIGRATE_TO_NAME});
+        success++;
+      }catch(e){
+        fail++;
+        console.warn("移行に失敗した報告ID:", r.id, e);
+      }
+    }
+    btn.disabled = false;
+    btn.textContent = "🔧（一時的な移行用）「令和8年熊本地震」のデータを「kumamoto2026」に統合する";
+    if(fail === 0){
+      toast(`移行が完了しました（${success}件を「${MIGRATE_TO_NAME}」に書き換えました）`);
+    }else{
+      toast(`移行が一部失敗しました（成功${success}件／失敗${fail}件）。もう一度実行するか、失敗分をご確認ください。`, true);
+    }
+  }
+
   function compressPhoto(file){
     return new Promise((resolve, reject)=>{
       const img = new Image();
@@ -1780,6 +1828,7 @@
     document.getElementById("printBtn").addEventListener("click", printReports);
     document.getElementById("csvBtn").addEventListener("click", exportCSV);
     document.getElementById("adminLink").addEventListener("click", handleAdminReset);
+    document.getElementById("migrateOfficeNameBtn").addEventListener("click", migrateOfficeName);
 
     document.getElementById("signOutBtn").addEventListener("click", ()=>{
       const sure = window.confirm("サインアウトしますか？次回開いたときは、もう一度合言葉の入力が必要になります。");
@@ -1945,6 +1994,8 @@
     if(infoBox) infoBox.style.display = (userRole === "admin") ? "block" : "none";
     const ruleText = document.getElementById("officeNamingRuleText");
     if(ruleText) ruleText.textContent = OFFICE_NAMING_RULE;
+    const migrateBtn = document.getElementById("migrateOfficeNameBtn");
+    if(migrateBtn) migrateBtn.style.display = (userRole === "admin") ? "block" : "none";
 
     updateScopeWarning();
   }
