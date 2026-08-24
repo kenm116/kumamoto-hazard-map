@@ -408,14 +408,24 @@
   <header>
     <h1>危険箇所マップ <span id="roleBadge" style="display:none; font-size:12px; font-weight:700; color:#fff; background:#5B6B7A; padding:3px 9px; border-radius:20px; vertical-align:middle;">管理者モード</span></h1>
     <p id="headerSubtitle">熊本地震・配達ルート情報共有</p>
+    <div id="adminOfficeInfoBox" style="display:none; margin:10px 0 4px 0; font-size:11px; line-height:1.6; color:var(--ink-soft); background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px;">
+      <b style="color:var(--ink);">拠点（郵便局）の追加について：</b><br>
+      事前登録は不要です。各拠点には合言葉として下記のルールで文字列を決めて伝えてください。その拠点の配達員が最初に合言葉を入力すると、自動的にその拠点のデータとして記録されます。<br>
+      <span style="display:inline-block; margin-top:6px; padding:6px 8px; background:var(--paper); border-radius:6px;" id="officeNamingRuleText"></span><br>
+      <span style="display:inline-block; margin-top:6px;">※まだ報告が1件も無い拠点は、下のプルダウンにはまだ表示されません（報告が届き次第、自動的に一覧に追加されます）。</span>
+    </div>
     <div class="print-zoom-row" id="adminDisasterRow" style="display:none; align-items:center; gap:8px; margin:10px 0 4px 0; font-size:12px; color:var(--ink-soft);">
-      <span>表示する災害：</span>
+      <span>表示する郵便局：</span>
       <select id="adminDisasterSelect" style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; background:#fff; color:var(--ink);">
-        <option value="">すべての災害</option>
+        <option value="">すべての郵便局</option>
       </select>
     </div>
+    <div class="export-row" id="officeManageRow" style="display:none; margin:0 0 10px 0;">
+      <button type="button" id="renameOfficeBtn" disabled style="flex:1; min-width:140px; border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:10px; padding:9px; font-size:12px; font-weight:700; cursor:pointer;">✏️ この郵便局名を変更</button>
+      <button type="button" id="deleteOfficeBtn" disabled style="flex:1; min-width:140px; border:1px solid var(--danger); background:#fff; color:var(--danger); border-radius:10px; padding:9px; font-size:12px; font-weight:700; cursor:pointer;">🗑️ この郵便局のデータを削除</button>
+    </div>
     <div id="scopeWarning" style="display:none; margin:0 0 10px 0; font-size:12px; color:var(--danger); font-weight:700;">
-      「すべての災害」を表示中は新しい報告を登録できません。上で特定の災害を選んでください。
+      「すべての郵便局」を表示中は新しい報告を登録できません。上で特定の郵便局を選んでください。
     </div>
     <div class="stats">
       <div class="stat-pill"><b id="stat-total">0</b> 件</div>
@@ -444,12 +454,21 @@
 
     <div class="field">
       <label>写真（複数枚可）</label>
-      <div class="photo-input">
-        <label class="photo-btn" id="photoLabel">
-          <span id="photoLabelText">タップして撮影・追加</span>
-          <input type="file" accept="image/*" capture="environment" multiple id="photoInput" style="display:none">
-        </label>
-        <div id="photoThumbs" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;"></div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; gap:8px;">
+          <label class="photo-btn" id="cameraPhotoLabel" style="flex:1.4; padding:16px 10px; font-weight:700; color:var(--post-red); background:#FDEDEA; border-style:solid; border-color:var(--post-red);">
+            <span id="cameraPhotoLabelText">📷 タップして撮影</span>
+            <input type="file" accept="image/*" capture="environment" multiple id="cameraPhotoInput" style="display:none">
+          </label>
+          <label class="photo-btn" id="libraryPhotoLabel" style="flex:1;">
+            <span id="libraryPhotoLabelText">🖼️ 写真を選択</span>
+            <input type="file" accept="image/*" multiple id="libraryPhotoInput" style="display:none">
+          </label>
+        </div>
+        <div id="photoThumbs" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+      </div>
+      <div style="font-size:11px; color:var(--ink-soft); margin-top:6px; line-height:1.5;">
+        ※ 報告に使う写真は自動で軽量化されます。<b>カメラで撮影した写真</b>は、選んだ直後に元データを端末に保存する案内が出ます（保存するかはご自身で選択してください）。<b style="color:var(--danger);">報告した後は、アプリ側から元の画質の写真を取り出すことはできません。</b>
       </div>
     </div>
 
@@ -546,18 +565,18 @@
   <div class="map-note">ピンをタップすると詳細が見られます。番号は一覧の番号と対応しています。ピンの色／周囲の円：赤=危険／橙=要注意／灰=警戒</div>
 
   <section class="list-section">
+    <div class="export-row">
+      <button class="export-btn" id="printBtn">🖨️ 表示範囲を印刷</button>
+      <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
+    </div>
+    <div class="print-zoom-row" style="font-size:12px; color:var(--ink-soft); margin:0 0 10px 0;">
+      印刷は、今地図に表示されている位置・倍率（上の「表示倍率」）を基準に使われます。用紙の形に合わせるため、表示範囲より少し広く印刷されることがあります（表示範囲が印刷から外れることはありません）。別のエリアを印刷したい場合は、地図を動かしてからもう一度印刷ボタンを押してください。
+    </div>
     <div class="list-tabs" id="listTabs">
       <button type="button" class="list-tab active" data-tab="open">未解消</button>
       <button type="button" class="list-tab" data-tab="resolved">解消済み</button>
     </div>
     <h2 id="listHeading">報告一覧</h2>
-    <div class="print-zoom-row" style="font-size:12px; color:var(--ink-soft); margin:0 0 10px 0;">
-      印刷は、今地図に表示されている位置・倍率（上の「表示倍率」）がそのまま使われます。別のエリアを印刷したい場合は、地図を動かしてからもう一度印刷ボタンを押してください。
-    </div>
-    <div class="export-row">
-      <button class="export-btn" id="printBtn">🖨️ 表示範囲を印刷</button>
-      <button class="export-btn" id="csvBtn">📄 データで書き出す(CSV)</button>
-    </div>
     <div id="listBody">
       <div class="empty-state">読み込み中…</div>
     </div>
@@ -565,7 +584,7 @@
   </section>
 
   <div class="hint-box">
-    報告はこのアプリを開いている配達員全員に共有されます。写真は自動で軽量化されますが、報告件数が非常に多くなると保存容量の上限に達する場合があります。
+    報告はこのアプリを開いている配達員全員に共有されます。写真は自動で軽量化されますが、報告件数が非常に多くなると保存容量の上限に達する場合があります。元の画質の写真は端末側に保存されない限り残らず、報告後にアプリから取り出すことはできません。
   </div>
 
   <div style="text-align:center; margin:20px 0 10px 0;">
@@ -578,6 +597,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-auth-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-database-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.16.0/firebase-app-check-compat.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -593,13 +613,21 @@
     messagingSenderId: "828112884275",
     appId: "1:828112884275:web:11dea040e7cafae231c946"
   };
-  // 2) 災害ごとの合言葉。新しい災害を追加する場合はこの配列に増やしてください。
-  const DISASTERS = [
-    { passcode: "kumamoto2026", name: "令和8年熊本地震" }
-  ];
-  // 3) 管理者用の閲覧パスコード（全災害を横断して閲覧・編集できる簡易ゲート）
+  // 2) 郵便局（拠点）の合言葉は事前登録が不要です。
+  //    各拠点の合言葉＝その拠点の名前として、そのまま入力してもらう方式にしています。
+  //    （例：合言葉として「西本町郵便局」と入力 → それがそのままその拠点のデータの区切りになる）
+  //    表記ゆれ防止のため、管理者は各拠点に「必ずこの形式で入力してください」という
+  //    命名ルールを伝えてください（画面下部の管理者用エリアにルールを表示できます）。
+  // 3) 管理者用の閲覧パスコード（全拠点を横断して閲覧・編集できる簡易ゲート）
   const ADMIN_GATE_PASSCODE = "kanri2026";
-  // 4) 管理者ログイン（全データ削除用）はFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
+  // 4) 管理者画面に表示する、拠点の合言葉の命名ルール（配達員向けの案内文）
+  const OFFICE_NAMING_RULE = "合言葉は「〇〇郵便局」の形式で、正式名称をそのまま入力してください（スペースや略称は使わないでください）";
+  // 5) 管理者ログイン（全データ削除用）はFirebase Authenticationの「メール/パスワード」アカウントで行います（コード内にパスワードは書きません）
+  // 6) App Check（reCAPTCHA v3）のサイトキー。Firebaseコンソールの
+  //    「App Check」で発行したサイトキーをここに貼り付けてください。
+  //    ★ まだ「強制（Enforce）」をFirebaseコンソール側でONにしないでください。
+  //      このコードを配布し、正常に動くことを確認してから最後にONにします。
+  const APP_CHECK_SITE_KEY = "6LcfbpMtAAAAAIKi9ykCbriebN9aRQZlXeUHjS2L";
   // ▲▲▲ ここまで ▲▲▲
 
   const GATE_KEY = "hazard-map-authed";
@@ -759,6 +787,16 @@
     }
     try{
       firebase.initializeApp(firebaseConfig);
+      // App Check：正規のこのWebアプリから送られたリクエストであることを検証する。
+      // サイトキーが未設定のままだと動作に支障が出るため、その場合はスキップする
+      // （コンソール側で「強制」をONにするまでは、未設定でも通常通り動作します）。
+      if(typeof firebase.appCheck === "function" && APP_CHECK_SITE_KEY && !APP_CHECK_SITE_KEY.startsWith("ここに")){
+        try{
+          firebase.appCheck().activate(APP_CHECK_SITE_KEY, true);
+        }catch(e){
+          console.warn("App Checkの初期化に失敗しました:", e);
+        }
+      }
       auth = firebase.auth();
       db = firebase.database();
     }catch(e){
@@ -819,6 +857,7 @@
   }
 
   function renderAll(){
+    refreshAdminOfficeOptions();
     renderStats();
     renderMarkers();
     renderList();
@@ -1031,12 +1070,11 @@
   function printReports(){
     document.body.classList.add("print-mode-single");
 
-    // "表示範囲を印刷": the map's zoom is already kept snapped to one of the
-    // 5 preset print levels (see the zoomend handler in initMap), and the
-    // "表示倍率" dropdown always reflects it. So printing simply uses
-    // whatever the map is currently showing — no last-minute zoom change
-    // needed, which is what caused pins to unexpectedly fall outside the
-    // view before.
+    // "表示範囲を印刷"：表示中の中心・倍率・範囲をあらかじめ覚えておく。
+    // 印刷後に元の見た目へ正確に戻すため、また印刷用の（縦横比が異なる）
+    // 枠でも表示範囲が必ず収まるようにするために使う。
+    const originalCenter = map.getCenter();
+    const originalZoom = map.getZoom();
     const bounds = map.getBounds();
     const filtered = (reports || []).filter(r => isVisibleOnMap(r) && bounds.contains([r.lat, r.lng]));
     const area = document.getElementById("printArea");
@@ -1095,6 +1133,12 @@
     mapCard.style.setProperty("border", "1px solid #999", "important");
     map.invalidateSize();
 
+    // 印刷用の枠は画面の枠と縦横比が異なる（横長）ため、同じ中心・倍率のままだと
+    // 縦方向だけ表示範囲より狭くなってしまうことがある。表示していた範囲
+    // （bounds）を必ず含むように、収まらない場合だけ自動でズームを引く
+    // （収まっている場合は元の倍率のまま、より広く印刷されるだけになる）。
+    map.fitBounds(bounds, {padding: [20, 20], maxZoom: originalZoom, animate: false});
+
     setTimeout(()=>{
       let reverted = false;
       let fallbackTimer = null;
@@ -1106,6 +1150,7 @@
         window.removeEventListener("afterprint", revert);
         mapCard.setAttribute("style", prevStyle);
         map.invalidateSize();
+        map.setView(originalCenter, originalZoom, {animate:false});
         document.body.classList.remove("print-mode-single", "print-no-list");
         area.innerHTML = "";
       };
@@ -1134,7 +1179,7 @@
     const showDisasterCol = (userRole === "admin" && !adminDisasterFilter);
     const numberMap = buildNumberMap();
     const header = showDisasterCol
-      ? ["番号","災害名","状態","危険度","タグ","補足メモ","住所","報告者","日時"]
+      ? ["番号","郵便局名","状態","危険度","タグ","補足メモ","住所","報告者","日時"]
       : ["番号","状態","危険度","タグ","補足メモ","住所","報告者","日時"];
     const rows = [...scoped]
       .sort((a,b)=> numberMap[a.id]-numberMap[b.id])
@@ -1249,8 +1294,8 @@
       document.querySelectorAll(".tag-opt").forEach(el=>el.classList.remove("active"));
       if(byId("commentInput")) byId("commentInput").value = "";
       renderPhotoThumbs();
-      if(byId("photoInput")) byId("photoInput").value = "";
-      if(byId("photoLabelText")) byId("photoLabelText").textContent = "タップして撮影・追加";
+      if(byId("cameraPhotoInput")) byId("cameraPhotoInput").value = "";
+      if(byId("libraryPhotoInput")) byId("libraryPhotoInput").value = "";
       if(byId("addressInput")){
         byId("addressInput").value = "";
         byId("addressInput").style.display = "none";
@@ -1421,7 +1466,6 @@
       if(existingPhotos.length){
         selectedPhotos = [...existingPhotos];
         renderPhotoThumbs();
-        if(byId("photoLabelText")) byId("photoLabelText").textContent = "写真を追加";
       }
 
       if(byId("nameInput")) byId("nameInput").value = r.reporterName || byId("nameInput").value;
@@ -1708,8 +1752,12 @@
     document.getElementById("adminDisasterSelect").addEventListener("change", (e)=>{
       adminDisasterFilter = e.target.value || null;
       updateScopeWarning();
+      updateOfficeManageButtons();
       renderAll();
     });
+
+    document.getElementById("renameOfficeBtn").addEventListener("click", renameSelectedOffice);
+    document.getElementById("deleteOfficeBtn").addEventListener("click", deleteSelectedOffice);
 
     document.querySelectorAll(".sev-opt").forEach(el=>{
       el.addEventListener("click", ()=>{
@@ -1766,33 +1814,73 @@
       location.reload();
     });
 
-    document.getElementById("photoInput").addEventListener("change", async (e)=>{
-      const files = Array.from(e.target.files || []);
+    // Web Share API（ファイル共有）が使える端末では、OS標準の共有シートを開いて
+    // 「写真に保存」等を選べるようにする。使えない環境ではダウンロードリンクで代用する。
+    // どちらの方法も、実際に保存するかどうかは配達員自身の操作に委ねられる
+    // （ブラウザの制約上、確認なしに自動保存することはできないため）。
+    async function offerSaveOriginalPhoto(file){
+      try{
+        if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+          await navigator.share({files:[file], title:"危険箇所の写真（元データ）"});
+          return;
+        }
+      }catch(err){
+        // キャンセルも含めて失敗してよい。報告作成自体は継続する。
+      }
+      try{
+        const url = URL.createObjectURL(file);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name || `report-photo-${Date.now()}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      }catch(err){
+        // 保存案内に失敗しても、報告作成の妨げにはしない
+      }
+    }
+
+    // 共通の写真処理：圧縮してselectedPhotosに追加する。
+    // offerSave=trueの場合のみ、圧縮前に端末への保存案内（共有シート／ダウンロード）を挟む
+    // （カメラでその場で撮った写真だけを想定。写真ライブラリから選んだ既存の写真は、
+    // 既に端末にあるはずなので保存案内は出さない）。
+    async function processSelectedPhotoFiles(fileInputId, files, offerSave){
       if(files.length === 0) return;
-      const labelText = document.getElementById("photoLabelText");
       const remaining = MAX_PHOTOS - selectedPhotos.length;
       if(remaining <= 0){
         toast(`写真は最大${MAX_PHOTOS}枚までです`);
-        e.target.value = "";
+        document.getElementById(fileInputId).value = "";
         return;
       }
       const toProcess = files.slice(0, remaining);
       if(files.length > toProcess.length){
         toast(`写真は最大${MAX_PHOTOS}枚までのため、一部のみ追加しました`);
       }
-      if(labelText) labelText.textContent = "処理中…";
       try{
+        if(offerSave){
+          toast("元の写真を端末に保存する画面を表示します（保存するかはご自身で選択してください）");
+        }
         for(const file of toProcess){
+          if(offerSave) await offerSaveOriginalPhoto(file);
           const compressed = await compressPhoto(file);
           selectedPhotos.push(compressed);
         }
         renderPhotoThumbs();
-        if(labelText) labelText.textContent = selectedPhotos.length ? "写真を追加" : "タップして撮影・追加";
       }catch(err){
-        if(labelText) labelText.textContent = "タップして撮影・追加";
         toast("写真の処理に失敗しました");
       }
-      e.target.value = "";
+      document.getElementById(fileInputId).value = "";
+    }
+
+    document.getElementById("cameraPhotoInput").addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      await processSelectedPhotoFiles("cameraPhotoInput", files, true);
+    });
+
+    document.getElementById("libraryPhotoInput").addEventListener("change", async (e)=>{
+      const files = Array.from(e.target.files || []);
+      await processSelectedPhotoFiles("libraryPhotoInput", files, false);
     });
 
     document.getElementById("gpsBtn").addEventListener("click", ()=>{
@@ -1873,21 +1961,22 @@
       return false;
     }
 
-    const matched = DISASTERS.find(d => d.passcode === val);
-    if(matched){
-      userRole = "disaster";
-      currentDisaster = matched.name;
-      try{
-        localStorage.setItem(GATE_KEY, "1");
-        localStorage.setItem(ROLE_KEY, "disaster");
-        localStorage.setItem(DISASTER_KEY, matched.name);
-      }catch(e){}
-      document.getElementById("gate").classList.add("hidden");
-      start();
+    if(!val){
+      document.getElementById("gateErr").textContent = "合言葉を入力してください";
       return false;
     }
 
-    document.getElementById("gateErr").textContent = "合言葉が違います";
+    // 事前登録なし：入力された文字列そのものを、その拠点（郵便局）の
+    // 識別名として扱う。同じ文字列を入力した人同士でデータが共有される。
+    userRole = "disaster";
+    currentDisaster = val;
+    try{
+      localStorage.setItem(GATE_KEY, "1");
+      localStorage.setItem(ROLE_KEY, "disaster");
+      localStorage.setItem(DISASTER_KEY, val);
+    }catch(e){}
+    document.getElementById("gate").classList.add("hidden");
+    start();
     return false;
   }
 
@@ -1914,19 +2003,123 @@
     }
     const adminRow = document.getElementById("adminDisasterRow");
     if(adminRow) adminRow.style.display = (userRole === "admin") ? "flex" : "none";
+    const infoBox = document.getElementById("adminOfficeInfoBox");
+    if(infoBox) infoBox.style.display = (userRole === "admin") ? "block" : "none";
+    const ruleText = document.getElementById("officeNamingRuleText");
+    if(ruleText) ruleText.textContent = OFFICE_NAMING_RULE;
 
-    if(userRole === "admin"){
-      const select = document.getElementById("adminDisasterSelect");
-      if(select && select.options.length <= 1){
-        DISASTERS.forEach(d=>{
-          const opt = document.createElement("option");
-          opt.value = d.name;
-          opt.textContent = d.name;
-          select.appendChild(opt);
-        });
+    updateScopeWarning();
+    updateOfficeManageButtons();
+  }
+  // 事前登録された局一覧は持たない。実際に届いている報告データの中から
+  // 使われている拠点名（合言葉）をユニークに拾い出し、管理者のプルダウンに
+  // 反映する。まだ一件も報告がない拠点は、報告が来るまでは一覧に出てこない。
+  function refreshAdminOfficeOptions(){
+    if(userRole !== "admin") return;
+    const select = document.getElementById("adminDisasterSelect");
+    if(!select) return;
+    const prevValue = select.value;
+    const names = Array.from(new Set((reports||[]).map(r=>r.disaster).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja"));
+    select.innerHTML = `<option value="">すべての郵便局</option>` + names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+    // フィルタ中だった拠点がまだ一覧にあれば選択状態を維持する
+    if(prevValue && names.includes(prevValue)){
+      select.value = prevValue;
+    }else if(prevValue && !names.includes(prevValue)){
+      // 選んでいた拠点のデータが無くなった場合は「すべて」に戻す
+      adminDisasterFilter = null;
+      select.value = "";
+      updateScopeWarning();
+    }
+    updateOfficeManageButtons();
+  }
+
+  function updateOfficeManageButtons(){
+    const row = document.getElementById("officeManageRow");
+    const renameBtn = document.getElementById("renameOfficeBtn");
+    const deleteBtn = document.getElementById("deleteOfficeBtn");
+    if(!row || !renameBtn || !deleteBtn) return;
+    row.style.display = (userRole === "admin") ? "flex" : "none";
+    const enabled = (userRole === "admin" && !!adminDisasterFilter);
+    renameBtn.disabled = !enabled;
+    deleteBtn.disabled = !enabled;
+  }
+
+  // 選択中の郵便局（合言葉）の名前を、配下の全報告ごとまとめて変更する。
+  async function renameSelectedOffice(){
+    if(!adminDisasterFilter){ toast("先に特定の郵便局を選んでください"); return; }
+    if(!db){ toast("Firebase未接続です", true); return; }
+    const oldName = adminDisasterFilter;
+    const input = window.prompt(`「${oldName}」の新しい合言葉（郵便局名）を入力してください`, oldName);
+    if(input === null) return;
+    const newName = input.trim();
+    if(!newName){ toast("空の名前には変更できません", true); return; }
+    if(newName === oldName){ return; }
+
+    const targets = (reports || []).filter(r => r.disaster === oldName);
+    const sure = window.confirm(
+      `「${oldName}」の${targets.length}件の合言葉を「${newName}」に変更します。\n` +
+      `この操作の後は、この郵便局の配達員には新しい合言葉「${newName}」を伝え直してください。\n\n` +
+      `よろしいですか？`
+    );
+    if(!sure) return;
+
+    const renameBtn = document.getElementById("renameOfficeBtn");
+    renameBtn.disabled = true;
+    renameBtn.textContent = "変更中…";
+    let success = 0, fail = 0;
+    for(const r of targets){
+      try{
+        await updateReport(r.id, {disaster: newName});
+        success++;
+      }catch(e){
+        fail++;
       }
     }
-    updateScopeWarning();
+    renameBtn.textContent = "✏️ この郵便局名を変更";
+    adminDisasterFilter = newName;
+    if(fail === 0){
+      toast(`「${oldName}」を「${newName}」に変更しました（${success}件）`);
+    }else{
+      toast(`一部失敗しました（成功${success}件／失敗${fail}件）`, true);
+    }
+  }
+
+  // 選択中の郵便局（合言葉）のデータを丸ごと削除する。誤って登録された
+  // 拠点や、テスト用の拠点を消したい場合に使用する。
+  async function deleteSelectedOffice(){
+    if(!adminDisasterFilter){ toast("先に特定の郵便局を選んでください"); return; }
+    if(!db){ toast("Firebase未接続です", true); return; }
+    const name = adminDisasterFilter;
+    const targets = (reports || []).filter(r => r.disaster === name);
+
+    const sure1 = window.confirm(
+      `「${name}」のデータ（${targets.length}件）をすべて削除します。この操作は取り消せません。\n\n本当によろしいですか？`
+    );
+    if(!sure1) return;
+    const sure2 = window.confirm(
+      `最終確認です。「${name}」の${targets.length}件を完全に削除します。よろしいですか？`
+    );
+    if(!sure2) return;
+
+    const deleteBtn = document.getElementById("deleteOfficeBtn");
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = "削除中…";
+    let success = 0, fail = 0;
+    for(const r of targets){
+      try{
+        await deleteReport(r.id);
+        success++;
+      }catch(e){
+        fail++;
+      }
+    }
+    deleteBtn.textContent = "🗑️ この郵便局のデータを削除";
+    adminDisasterFilter = null;
+    if(fail === 0){
+      toast(`「${name}」のデータを削除しました（${success}件）`);
+    }else{
+      toast(`一部失敗しました（成功${success}件／失敗${fail}件）`, true);
+    }
   }
 
   function updateScopeWarning(){
