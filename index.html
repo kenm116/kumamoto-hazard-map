@@ -21,6 +21,7 @@
     --minor:#6B7A8F;
     --resolved:#4C7A5E;
     --post-red:#D2001F;
+    --approx:#1D5FBF;
     --card:#ffffff;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
@@ -236,6 +237,7 @@
   }
   .loc-status{font-size:12px; margin-top:8px;}
   .loc-status.ok{color:var(--resolved); font-weight:700;}
+  .loc-status.approx{color:#1D5FBF; font-weight:700;}
   .loc-status.err{color:var(--danger);}
 
   .submit-btn{
@@ -654,6 +656,10 @@
   let reports = [];
   let selectedSeverity = null;
   let selectedLatLng = null;
+  let isApproximateLocation = false; // 高精度モードが全滅し、低精度モードで取得できた場合にtrue
+  let selectedAccuracy = null;       // 取得できた位置の誤差半径（メートル）
+  let tempLocationMarker = null;     // 「およその位置」を示す仮ピン（青系統）
+  let tempAccuracyCircle = null;     // 仮ピンの誤差範囲を示す円
   const selectedTags = new Set();
   let selectedPhotos = []; // 圧縮済みの写真（複数枚, dataURL文字列の配列）
   const MAX_PHOTOS = 5;
@@ -714,6 +720,8 @@
     map.on("click", function(e){
       if(!tapModeActive) return;
       selectedLatLng = e.latlng;
+      isApproximateLocation = false;
+      selectedAccuracy = null;
       updateLocStatus();
       setTapMode(false);
       toast("位置を設定しました");
@@ -1280,6 +1288,8 @@
     try{
       selectedSeverity = null;
       selectedLatLng = null;
+      isApproximateLocation = false;
+      selectedAccuracy = null;
       selectedPhotos = [];
       selectedTags.clear();
       if(byId("editingId")) byId("editingId").value = "";
@@ -1308,13 +1318,51 @@
     }
   }
 
+  // 「およその位置」を示す仮ピンと誤差範囲の円を管理する（危険度ピンとは
+  // 明確に区別できる青系統の色を使用。地図には報告として保存されるまでは載らない）。
+  function clearTempLocationMarker(){
+    if(tempLocationMarker){ map.removeLayer(tempLocationMarker); tempLocationMarker = null; }
+    if(tempAccuracyCircle){ map.removeLayer(tempAccuracyCircle); tempAccuracyCircle = null; }
+  }
+
+  function updateTempLocationMarker(){
+    clearTempLocationMarker();
+    if(!selectedLatLng || !isApproximateLocation) return;
+    const latlng = [selectedLatLng.lat, selectedLatLng.lng];
+    if(selectedAccuracy){
+      tempAccuracyCircle = L.circle(latlng, {
+        radius: selectedAccuracy,
+        color: "#1D5FBF",
+        weight: 1,
+        fillColor: "#1D5FBF",
+        fillOpacity: 0.12,
+        interactive: false
+      }).addTo(map);
+    }
+    tempLocationMarker = L.circleMarker(latlng, {
+      radius: 9,
+      color: "#1D5FBF",
+      weight: 2,
+      fillColor: "#1D5FBF",
+      fillOpacity: 0.9,
+      interactive: false
+    }).addTo(map);
+  }
+
   function updateLocStatus(){
     const el = document.getElementById("locStatus");
     const addrInput = document.getElementById("addressInput");
     if(!el || !addrInput) return;
     if(selectedLatLng){
-      el.textContent = `設定済み（${selectedLatLng.lat.toFixed(5)}, ${selectedLatLng.lng.toFixed(5)}）`;
-      el.className = "loc-status ok";
+      if(isApproximateLocation){
+        const accuracyText = selectedAccuracy ? `誤差 約${Math.round(selectedAccuracy)}m` : "誤差あり";
+        el.textContent = `およその位置です（${accuracyText}）／『地図で指定』で位置を修正できます`;
+        el.className = "loc-status approx";
+      }else{
+        el.textContent = `設定済み（${selectedLatLng.lat.toFixed(5)}, ${selectedLatLng.lng.toFixed(5)}）`;
+        el.className = "loc-status ok";
+      }
+      updateTempLocationMarker();
       addrInput.style.display = "block";
       addrInput.value = "住所を取得中…";
       addrInput.disabled = true;
@@ -1331,6 +1379,7 @@
       el.className = "loc-status";
       addrInput.style.display = "none";
       addrInput.value = "";
+      clearTempLocationMarker();
     }
   }
 
@@ -1454,6 +1503,8 @@
       if(byId("commentInput")) byId("commentInput").value = (r.note !== undefined) ? r.note : (r.comment || "");
 
       selectedLatLng = {lat:r.lat, lng:r.lng};
+      isApproximateLocation = false;
+      selectedAccuracy = null;
       updateLocStatus();
       const addrInput = byId("addressInput");
       if(addrInput && r.address){
@@ -1883,21 +1934,57 @@
       await processSelectedPhotoFiles("libraryPhotoInput", files, false);
     });
 
-    document.getElementById("gpsBtn").addEventListener("click", ()=>{
+    function getPositionOnce(options){
+      return new Promise((resolve, reject)=>{
+        navigator.geolocation.getCurrentPosition(resolve, reject, options);
+      });
+    }
+
+    document.getElementById("gpsBtn").addEventListener("click", async ()=>{
       if(!navigator.geolocation){ toast("この端末は位置情報に対応していません"); return; }
-      document.getElementById("locStatus").textContent = "取得中…";
-      navigator.geolocation.getCurrentPosition(
-        pos=>{
-          selectedLatLng = {lat:pos.coords.latitude, lng:pos.coords.longitude};
-          updateLocStatus();
-        },
-        err=>{
-          const el = document.getElementById("locStatus");
-          el.textContent = "取得できませんでした。地図で指定してください。";
-          el.className = "loc-status err";
-        },
-        {enableHighAccuracy:true, timeout:8000}
-      );
+      const el = document.getElementById("locStatus");
+      const btn = document.getElementById("gpsBtn");
+      el.textContent = "取得中…";
+      el.className = "loc-status";
+      btn.disabled = true;
+
+      const HIGH_ACCURACY_ATTEMPTS = 3;
+      const HIGH_ACCURACY_TIMEOUT = 18000; // 1回あたり18秒まで粘る
+      const LOW_ACCURACY_TIMEOUT = 10000;  // 最後のフォールバックは10秒
+
+      let pos = null;
+      for(let i=0; i<HIGH_ACCURACY_ATTEMPTS && !pos; i++){
+        if(i>0) el.textContent = `取得中…（再試行 ${i+1}/${HIGH_ACCURACY_ATTEMPTS}）`;
+        try{
+          pos = await getPositionOnce({enableHighAccuracy:true, timeout:HIGH_ACCURACY_TIMEOUT, maximumAge:0});
+        }catch(err){
+          // 次の試行へ
+        }
+      }
+
+      let usedLowAccuracy = false;
+      if(!pos){
+        el.textContent = "取得中…（精度を落として再試行）";
+        try{
+          pos = await getPositionOnce({enableHighAccuracy:false, timeout:LOW_ACCURACY_TIMEOUT, maximumAge:60000});
+          usedLowAccuracy = true;
+        }catch(err){
+          // すべて失敗
+        }
+      }
+
+      btn.disabled = false;
+
+      if(!pos){
+        el.textContent = "取得できませんでした。地図で指定してください。";
+        el.className = "loc-status err";
+        return;
+      }
+
+      selectedLatLng = {lat: pos.coords.latitude, lng: pos.coords.longitude};
+      selectedAccuracy = (typeof pos.coords.accuracy === "number") ? pos.coords.accuracy : null;
+      isApproximateLocation = usedLowAccuracy;
+      updateLocStatus();
     });
 
     document.getElementById("tapBtn").addEventListener("click", ()=>setTapMode(true));
